@@ -1,0 +1,33 @@
+case_id: login_user
+case_name: user 登录流程
+description: 打开 user 登录页，输入环境变量中的账号密码并提交。
+mode: web
+sessions:
+  - name: user
+    login_url: "${env.USER_LOGIN_URL}"
+    username: "${env.USER_USERNAME}"
+    password: "${env.USER_PASSWORD}"
+  - name: admin
+    login_url: "${env.ADMIN_LOGIN_URL}"
+    username: "${env.ADMIN_USERNAME}"
+    password: "${env.ADMIN_PASSWORD}"
+locations:
+  file: "cases/location/login.user.yaml"
+steps:
+  - step_id: user_open_login
+    name: user 打开登录页
+    type: web_open
+    session: user
+    url: "${session.login_url}"
+  - step_id: user_login
+    name: user 登录
+    type: flow_login
+    session: user
+    username: "${session.username}"
+    password: "${session.password}"
+  - step_id: user_assert_home_visible
+    name: user 登录后页面可见
+    type: web_assert_visible
+    session: user
+    target: user_home_marker
+    continue_on_failure: true

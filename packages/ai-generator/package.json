@@ -1,0 +1,17 @@
+{
+  "name": "@ai-e2e/ai-generator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/**/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ai-e2e/shared": "workspace:*",
+    "yaml": "^2.4.2"
+  }
+}

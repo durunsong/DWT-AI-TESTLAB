@@ -1,0 +1,26 @@
+case_id: approval_template
+case_name: 审核流程模板
+mode: hybrid
+sessions:
+  - name: admin
+    login_url: "${env.ADMIN_LOGIN_URL}"
+    username: "${env.ADMIN_USERNAME}"
+    password: "${env.ADMIN_PASSWORD}"
+locations:
+  file: "cases/location/kyc.submit-and-approve.yaml"
+steps:
+  - step_id: admin_open_login
+    name: admin 打开登录页
+    type: web_open
+    session: admin
+    url: "${session.login_url}"
+  - step_id: admin_login
+    name: admin 登录
+    type: flow_login
+    session: admin
+    username: "${session.username}"
+    password: "${session.password}"
+  - step_id: admin_approve
+    name: admin 审核通过
+    type: flow_admin_approve_kyc
+    session: admin

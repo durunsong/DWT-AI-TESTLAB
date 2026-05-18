@@ -1,0 +1,22 @@
+case_id: login_template
+case_name: 登录流程模板
+mode: web
+sessions:
+  - name: user
+    login_url: "${env.USER_LOGIN_URL}"
+    username: "${env.USER_USERNAME}"
+    password: "${env.USER_PASSWORD}"
+locations:
+  file: "cases/location/login.user.yaml"
+steps:
+  - step_id: open_login
+    name: 打开登录页
+    type: web_open
+    session: user
+    url: "${session.login_url}"
+  - step_id: submit_login
+    name: 提交登录
+    type: flow_login
+    session: user
+    username: "${session.username}"
+    password: "${session.password}"

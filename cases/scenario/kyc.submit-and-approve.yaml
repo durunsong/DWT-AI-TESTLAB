@@ -1,0 +1,78 @@
+case_id: kyc_submit_and_approve
+case_name: 企业认证 KYC 提交并由管理端审核
+description: user 端提交企业认证，admin 端审核通过，最后 user 端回查状态。
+mode: hybrid
+sessions:
+  - name: user
+    login_url: "${env.USER_LOGIN_URL}"
+    username: "${env.USER_USERNAME}"
+    password: "${env.USER_PASSWORD}"
+  - name: admin
+    login_url: "${env.ADMIN_LOGIN_URL}"
+    username: "${env.ADMIN_USERNAME}"
+    password: "${env.ADMIN_PASSWORD}"
+variables:
+  enterprise_name: "${env.KYC_ENTERPRISE_NAME_PREFIX}_${timestamp}"
+  license_no: "${env.KYC_LICENSE_NO_PREFIX}_${timestamp}"
+  legal_person: "${env.KYC_LEGAL_PERSON}"
+  id_card_no: "${env.KYC_ID_CARD_NO}"
+  review_remark: "${env.KYC_REVIEW_REMARK}"
+locations:
+  file: "cases/location/kyc.submit-and-approve.yaml"
+steps:
+  - step_id: user_open_login
+    name: user 打开登录页
+    type: web_open
+    session: user
+    url: "${session.login_url}"
+  - step_id: user_login
+    name: user 登录
+    type: flow_login
+    session: user
+    username: "${session.username}"
+    password: "${session.password}"
+  - step_id: user_open_kyc
+    name: user 进入 KYC 页面
+    type: web_click
+    session: user
+    target: user_kyc_menu
+  - step_id: user_submit_kyc
+    name: user 提交 KYC
+    type: flow_submit_kyc
+    session: user
+  - step_id: user_assert_pending
+    name: 断言 user 端状态为审核中
+    type: web_assert_text
+    session: user
+    target: kyc_status
+    expected: "审核中"
+  - step_id: admin_open_login
+    name: admin 打开登录页
+    type: web_open
+    session: admin
+    url: "${session.login_url}"
+  - step_id: admin_login
+    name: admin 登录
+    type: flow_login
+    session: admin
+    username: "${session.username}"
+    password: "${session.password}"
+  - step_id: admin_open_kyc_review
+    name: admin 进入 KYC 审核列表
+    type: web_click
+    session: admin
+    target: admin_kyc_menu
+  - step_id: admin_approve_kyc
+    name: admin 审核通过 KYC
+    type: flow_admin_approve_kyc
+    session: admin
+  - step_id: user_reload_kyc
+    name: user 刷新 KYC 页面
+    type: web_reload
+    session: user
+  - step_id: user_assert_approved
+    name: 断言 user 端状态为审核通过
+    type: web_assert_text
+    session: user
+    target: kyc_status
+    expected: "审核通过"

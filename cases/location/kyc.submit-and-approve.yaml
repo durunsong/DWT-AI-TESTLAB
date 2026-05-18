@@ -1,0 +1,94 @@
+user_login_username:
+  testId: "user-login-username"
+  fallback:
+    - placeholder: "请输入账号"
+    - placeholder: "请输入您的手机号或邮箱"
+    - name: "username"
+user_login_password:
+  testId: "user-login-password"
+  fallback:
+    - placeholder: "请输入密码"
+    - placeholder: "请输入您的登录密码"
+    - name: "password"
+user_login_submit:
+  testId: "user-login-submit"
+  fallback:
+    - text: "登录"
+admin_login_username:
+  testId: "admin-login-username"
+  fallback:
+    - placeholder: "请输入账号"
+    - placeholder: "请输入您的手机号或邮箱"
+    - name: "username"
+admin_login_password:
+  testId: "admin-login-password"
+  fallback:
+    - placeholder: "请输入密码"
+    - placeholder: "请输入您的登录密码"
+    - name: "password"
+admin_login_submit:
+  testId: "admin-login-submit"
+  fallback:
+    - text: "登录"
+user_kyc_menu:
+  testId: "user-kyc-menu"
+  fallback:
+    - text: "企业认证"
+    - text: "KYC"
+kyc_enterprise_name:
+  testId: "kyc-enterprise-name"
+  fallback:
+    - placeholder: "请输入企业名称"
+kyc_license_no:
+  testId: "kyc-license-no"
+  fallback:
+    - placeholder: "请输入营业执照号"
+kyc_legal_person:
+  testId: "kyc-legal-person"
+  fallback:
+    - placeholder: "请输入法人"
+kyc_id_card_no:
+  testId: "kyc-id-card-no"
+  fallback:
+    - placeholder: "请输入身份证号"
+kyc_submit:
+  testId: "kyc-submit"
+  fallback:
+    - text: "提交审核"
+    - text: "提交"
+kyc_status:
+  testId: "kyc-status"
+  fallback:
+    - text: "审核中"
+    - text: "审核通过"
+admin_kyc_menu:
+  testId: "admin-kyc-menu"
+  fallback:
+    - text: "企业认证审核"
+    - text: "KYC审核"
+admin_kyc_search_input:
+  testId: "admin-kyc-search-input"
+  fallback:
+    - placeholder: "请输入企业名称"
+    - placeholder: "请输入申请单号"
+admin_kyc_search_submit:
+  testId: "admin-kyc-search-submit"
+  fallback:
+    - text: "搜索"
+admin_kyc_review_button:
+  testId: "admin-kyc-review-button"
+  fallback:
+    - text: "审核"
+admin_kyc_review_remark:
+  testId: "admin-kyc-review-remark"
+  fallback:
+    - placeholder: "请输入审核备注"
+admin_kyc_approve_button:
+  testId: "admin-kyc-approve-button"
+  fallback:
+    - text: "通过"
+    - text: "审核通过"
+admin_kyc_confirm:
+  testId: "admin-kyc-confirm"
+  fallback:
+    - text: "确认"

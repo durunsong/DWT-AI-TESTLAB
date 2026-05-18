@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+reports/*.json
+reports/*.html
+logs/*.log
+screenshots/**/*
+traces/**/*
+test-results/
+playwright-report/

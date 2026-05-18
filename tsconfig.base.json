@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noUncheckedIndexedAccess": true,
+    "baseUrl": ".",
+    "paths": {
+      "@ai-e2e/shared": ["packages/shared/src/index.ts"],
+      "@ai-e2e/runner": ["packages/runner/src/index.ts"],
+      "@ai-e2e/ai-generator": ["packages/ai-generator/src/index.ts"]
+    }
+  }
+}
