@@ -9,6 +9,8 @@ import { createArtifactPaths } from "../utils/artifact";
 import { EnvGuard } from "../utils/env-guard";
 import { RunLogger } from "../utils/logger";
 import { VisualExecutor } from "../executors/visual-executor";
+import { DbExecutor } from "../executors/db-executor";
+import { DbStepExecutor } from "../executors/db-step-executor";
 import { WebExecutor } from "../executors/web-executor";
 
 export type RunnerEventHandler = (event: TestRunEvent) => void | Promise<void>;
@@ -53,6 +55,10 @@ export class ScenarioOrchestrator {
       tracesDir: artifacts.tracesDir
     });
     const visual = new VisualExecutor(process.env.VISUAL_MODE === "true" || process.env.HEADLESS !== "true");
+    const dbExecutor = new DbStepExecutor({
+      context,
+      db: new DbExecutor({ env: input.env, enabled: process.env.DB_ENABLED === "true" })
+    });
     const webExecutor = new WebExecutor({
       rootDir: this.rootDir,
       locations,
@@ -60,6 +66,7 @@ export class ScenarioOrchestrator {
       logger,
       visual,
       screenshotDir: artifacts.screenshotsDir,
+      defaults: scenario.defaults,
       getPage: (session) => sessionManager.getPage(session),
       newPage: (session) => sessionManager.newPage(session)
     });
@@ -82,17 +89,16 @@ export class ScenarioOrchestrator {
           continue;
         }
 
-        const step = resolveRecordValues(originalStep, context.state, originalStep) as ScenarioStep;
         stepResult.status = "running";
         stepResult.startedAt = new Date().toISOString();
         await this.emit(input.onEvent, { runId, type: "step_updated", status: "running", step: stepResult, at: stepResult.startedAt });
 
+        let step = originalStep;
         try {
-          if (!step.session) {
-            throw new Error(`${step.type} 必须指定 session`);
-          }
-          const page = await sessionManager.getPage(step.session);
-          const partial = await webExecutor.execute(page, step);
+          step = resolveRecordValues(originalStep, context.state, originalStep) as ScenarioStep;
+          const partial = this.isDbStep(step)
+            ? await dbExecutor.execute(step)
+            : await this.executeWebStep(sessionManager, webExecutor, step);
           Object.assign(stepResult, partial);
           stepResult.status = "passed";
           stepResult.endedAt = new Date().toISOString();
@@ -100,7 +106,7 @@ export class ScenarioOrchestrator {
           await logger.info(`步骤执行成功：${step.step_id}`, { durationMs: stepResult.durationMs });
           await this.emit(input.onEvent, { runId, type: "step_updated", status: "passed", step: stepResult, at: stepResult.endedAt });
         } catch (error) {
-          const page = step.session ? await sessionManager.getPage(step.session).catch(() => undefined) : undefined;
+          const page = step.session && !this.isDbStep(step) ? await sessionManager.getPage(step.session).catch(() => undefined) : undefined;
           if (page) {
             Object.assign(stepResult, await webExecutor.captureFailure(page, step.step_id));
             await visual.updateStep(page, step, "failed");
@@ -155,6 +161,18 @@ export class ScenarioOrchestrator {
       session: step.session,
       status: "pending"
     };
+  }
+
+  private async executeWebStep(sessionManager: SessionManager, webExecutor: WebExecutor, step: ScenarioStep): Promise<Partial<StepResult>> {
+    if (!step.session) {
+      throw new Error(`${step.type} 必须指定 session`);
+    }
+    const page = await sessionManager.getPage(step.session);
+    return webExecutor.execute(page, step);
+  }
+
+  private isDbStep(step: ScenarioStep): boolean {
+    return step.type === "db_query" || step.type === "db_assert" || step.type === "db_clean";
   }
 
   private async emit(handler: RunnerEventHandler | undefined, event: TestRunEvent): Promise<void> {

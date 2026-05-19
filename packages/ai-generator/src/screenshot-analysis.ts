@@ -1,4 +1,5 @@
 import type { AiChatMessage } from "./openai-compatible-client";
+import { appBrandName } from "./brand";
 
 export interface ScreenshotAnalysisInput {
   imageDataUrl: string;
@@ -16,7 +17,7 @@ export function buildScreenshotAnalysisMessages(input: ScreenshotAnalysisInput):
     {
       role: "system",
       content: [
-        "你是 Dowalet 自动化测试的视觉诊断助手。",
+        `你是 ${appBrandName()} 自动化测试的视觉诊断助手。`,
         "根据失败截图判断页面当前状态、自动化失败原因、下一步应该点击或输入的位置。",
         "只输出简洁的中文分析，不要输出账号、密码、token、cookie 等敏感信息。"
       ].join("\n")

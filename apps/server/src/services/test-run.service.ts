@@ -2,6 +2,8 @@ import { EventEmitter } from "node:events";
 import path from "node:path";
 import { ScenarioOrchestrator } from "@ai-e2e/runner";
 import type { CreateTestRunRequest, RunReport, TestRunEvent, TestRunSummary } from "@ai-e2e/shared";
+import type { EnvConfigService } from "./env-config.service";
+import { normalizeTestEnv } from "./env-config.service";
 import { createNextRunId } from "./run-id";
 
 export class TestRunService {
@@ -10,18 +12,21 @@ export class TestRunService {
 
   constructor(
     private readonly runner: ScenarioOrchestrator,
-    private readonly rootDir: string
+    private readonly rootDir: string,
+    private readonly envConfigService?: EnvConfigService
   ) {
     this.events.setMaxListeners(100);
   }
 
   async start(request: CreateTestRunRequest): Promise<TestRunSummary> {
+    const env = normalizeTestEnv(request.env);
+    await this.envConfigService?.applyToProcess(env);
     const runId = await createNextRunId(this.rootDir, request.caseId);
     const startedAt = new Date().toISOString();
     const summary: TestRunSummary = {
       runId,
       caseId: request.caseId,
-      env: request.env,
+      env,
       status: "running",
       total: 0,
       passed: 0,
@@ -36,7 +41,7 @@ export class TestRunService {
     void this.runner.run({
       runId,
       caseId: request.caseId,
-      env: request.env,
+      env,
       onEvent: (event) => this.applyEvent(summary, event)
     }).then((report) => {
       this.applyReport(summary, report);

@@ -22,6 +22,7 @@ export interface StepResult {
   error?: string;
   screenshot?: string;
   trace?: string;
+  data?: unknown;
 }
 
 export interface TestRunSummary {

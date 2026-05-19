@@ -14,8 +14,12 @@
     "@ai-e2e/ai-generator": "workspace:*",
     "@ai-e2e/runner": "workspace:*",
     "@ai-e2e/shared": "workspace:*",
+    "@types/pdf-parse": "^1.1.5",
     "dotenv": "^16.4.5",
     "fastify": "^4.27.0",
-    "tsx": "^4.11.0"
+    "mammoth": "^1.12.0",
+    "pdf-parse": "^2.4.5",
+    "tsx": "^4.11.0",
+    "yaml": "^2.9.0"
   }
 }

@@ -9,7 +9,7 @@
 - `packages/ai-generator`：AI 生成 DSL 的 prompt 与校验占位能力。
 - `apps/server`：Fastify API，提供用例列表、运行触发、运行状态、SSE、报告和日志接口。
 - `apps/web`：React 测试运行工作台。
-- `front-end/dowalet-dev/ccc.json`、`front-end/dowalet-dev/ddd.json`：作为 Dowalet user/admin 登录返回与路由表上下文来源，平台只读取脱敏摘要。
+- `front-end/dowalet-dev/ccc.json`、`front-end/dowalet-dev/ddd.json`：作为 `${APP_BRAND_NAME}` user/admin 登录返回与路由表上下文来源，平台只读取脱敏摘要。
 
 ## 启动
 
@@ -36,7 +36,7 @@ pnpm --filter @ai-e2e/web dev
 
 `TEST_ENV` 只允许 `local`、`dev`、`test`、`sit`。`prod` 和 `production` 会被拦截。
 
-## Dowalet 适配
+## `${APP_BRAND_NAME}` 适配
 
 平台默认通过 `DOWALET_USER_AUTH_FILE` 和 `DOWALET_ADMIN_AUTH_FILE` 读取 `dowalet-dev` 登录后返回数据，提取企业认证、审批审核相关路由，用于辅助完善 YAML DSL 和页面定位。接口为：
 

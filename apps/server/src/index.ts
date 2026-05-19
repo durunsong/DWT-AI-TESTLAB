@@ -7,11 +7,13 @@ import { registerAiRoutes } from "./routes/ai.routes";
 import { registerCaseRoutes } from "./routes/cases.routes";
 import { registerDbRoutes } from "./routes/db.routes";
 import { registerDowaletContextRoutes } from "./routes/dowalet-context.routes";
+import { registerSettingsRoutes } from "./routes/settings.routes";
 import { registerTestRunEventRoutes } from "./routes/test-run-events.routes";
 import { registerTestRunRoutes } from "./routes/test-runs.routes";
 import { CaseService } from "./services/case.service";
 import { DbService } from "./services/db.service";
 import { DowaletContextService } from "./services/dowalet-context.service";
+import { EnvConfigService } from "./services/env-config.service";
 import { ReportService } from "./services/report.service";
 import { TestRunService } from "./services/test-run.service";
 
@@ -20,8 +22,9 @@ dotenv.config({ path: path.resolve(rootDir, ".env") });
 
 const app = Fastify({ logger: true });
 const runner = new ScenarioOrchestrator(rootDir);
-const caseService = new CaseService(runner);
-const testRunService = new TestRunService(runner, rootDir);
+const envConfigService = new EnvConfigService(rootDir);
+const caseService = new CaseService(runner, rootDir);
+const testRunService = new TestRunService(runner, rootDir, envConfigService);
 const reportService = new ReportService(rootDir);
 const dowaletContextService = new DowaletContextService(rootDir);
 const dbService = new DbService();
@@ -32,6 +35,7 @@ await registerTestRunEventRoutes(app, testRunService);
 await registerAiRoutes(app, rootDir);
 await registerDowaletContextRoutes(app, dowaletContextService);
 await registerDbRoutes(app, dbService);
+await registerSettingsRoutes(app, envConfigService);
 
 app.setErrorHandler((error, _request, reply) => {
   app.log.error(error);

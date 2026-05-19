@@ -24,6 +24,10 @@ export class WebExecutor {
       logger: RunLogger;
       visual: VisualExecutor;
       screenshotDir: string;
+      defaults?: {
+        step_timeout_ms?: number;
+        wait_for_network?: boolean;
+      };
       getPage?: (session: SessionName) => Promise<Page>;
       newPage?: (session: SessionName) => Promise<Page>;
     }
@@ -37,12 +41,15 @@ export class WebExecutor {
     switch (step.type) {
       case "web_open":
         await page.goto(this.resolve(step.url), { waitUntil: "domcontentloaded" });
+        await this.waitForNetworkIfNeeded(page, step);
         return { message: `已打开 ${this.resolve(step.url)}` };
       case "web_reload":
         await page.reload({ waitUntil: "domcontentloaded" });
+        await this.waitForNetworkIfNeeded(page, step);
         return { message: "页面已刷新" };
       case "web_click":
         await this.click(page, step);
+        await this.waitForNetworkIfNeeded(page, step);
         return { message: "点击完成" };
       case "web_input":
         await this.inputText(page, step);
@@ -51,22 +58,22 @@ export class WebExecutor {
         await this.upload(page, step);
         return { message: "上传完成" };
       case "web_wait_text":
-        await (await this.locator(page, step)).filter({ hasText: this.resolve(step.expected) }).waitFor({ timeout: step.timeout_ms ?? 10_000 });
-        return { message: `已等待文本：${this.resolve(step.expected)}` };
+        await (await this.locator(page, step)).filter({ hasText: this.resolve(this.stringField(step.expected, "expected")) }).waitFor({ timeout: this.timeoutMs(step) });
+        return { message: `已等待文本：${this.resolve(this.stringField(step.expected, "expected"))}` };
       case "web_wait_element":
-        await (await this.locator(page, step)).waitFor({ state: "visible", timeout: step.timeout_ms ?? 10_000 });
+        await (await this.locator(page, step)).waitFor({ state: "visible", timeout: this.timeoutMs(step) });
         return { message: "元素已出现" };
       case "web_assert_text":
         await this.assertText(page, step);
         return { message: "文本断言通过" };
       case "web_assert_visible": {
         const locator = await this.locator(page, step);
-        await locator.waitFor({ state: "visible", timeout: step.timeout_ms ?? 10_000 });
+        await locator.waitFor({ state: "visible", timeout: this.timeoutMs(step) });
         await this.input.visual.highlight(page, locator, "passed");
         return { message: "可见性断言通过" };
       }
       case "web_assert_url":
-        await page.waitForURL(new RegExp(this.resolve(step.expected)), { timeout: step.timeout_ms ?? 10_000 });
+        await page.waitForURL(new RegExp(this.resolve(this.stringField(step.expected, "expected"))), { timeout: this.timeoutMs(step) });
         return { message: "URL 断言通过" };
       case "web_extract":
         await this.extract(page, step);
@@ -98,13 +105,16 @@ export class WebExecutor {
 
   private async flowLogin(page: Page, step: ScenarioStep): Promise<void> {
     const prefix = step.session === "admin" ? "admin_login" : "user_login";
+    const session = step.session ? this.input.context.state.sessions[step.session] : undefined;
+    const username = step.username ?? session?.username;
+    const password = step.password ?? session?.password;
     const diagnostics = this.collectLoginDiagnostics(page);
     try {
-      const usernameStep = { ...step, target: `${prefix}_username`, value: this.resolve(step.username) };
+      const usernameStep = { ...step, target: `${prefix}_username`, value: this.resolve(username) };
       const usernameLocator = await this.locator(page, usernameStep);
       await this.input.visual.highlight(page, usernameLocator);
-      await usernameLocator.fill(this.resolve(step.username), { timeout: step.timeout_ms ?? 10_000 });
-      await this.inputText(page, { ...step, target: `${prefix}_password`, value: this.resolve(step.password) });
+      await usernameLocator.fill(this.resolve(username), { timeout: this.timeoutMs(step) });
+      await this.inputText(page, { ...step, target: `${prefix}_password`, value: this.resolve(password) });
       await this.click(page, { ...step, target: `${prefix}_submit` });
       await this.completeOptionalDeviceVerification(page, step);
       await this.waitForLoginCompleted(page, usernameLocator, step, diagnostics);
@@ -248,27 +258,27 @@ export class WebExecutor {
   private async inputText(page: Page, step: ScenarioStep): Promise<void> {
     const locator = await this.locator(page, step);
     await this.input.visual.highlight(page, locator);
-    await locator.fill(this.resolve(step.value), { timeout: step.timeout_ms ?? 10_000 });
+    await locator.fill(this.resolve(step.value), { timeout: this.timeoutMs(step) });
   }
 
   private async click(page: Page, step: ScenarioStep): Promise<void> {
     const locator = await this.locator(page, step);
     await this.input.visual.highlight(page, locator);
     await this.input.visual.clickRipple(page, locator);
-    await locator.click({ timeout: step.timeout_ms ?? 10_000 });
+    await locator.click({ timeout: this.timeoutMs(step) });
   }
 
   private async upload(page: Page, step: ScenarioStep): Promise<void> {
     const locator = await this.locator(page, step);
     await this.input.visual.highlight(page, locator);
-    await locator.setInputFiles(path.resolve(this.input.rootDir, this.resolve(step.file)), { timeout: step.timeout_ms ?? 10_000 });
+    await locator.setInputFiles(path.resolve(this.input.rootDir, this.resolve(step.file)), { timeout: this.timeoutMs(step) });
   }
 
   private async assertText(page: Page, step: ScenarioStep): Promise<void> {
     const locator = await this.locator(page, step);
     await this.input.visual.highlight(page, locator);
-    const expected = this.resolve(step.expected);
-    const text = (await locator.textContent({ timeout: step.timeout_ms ?? 10_000 })) ?? "";
+    const expected = this.resolve(this.stringField(step.expected, "expected"));
+    const text = (await locator.textContent({ timeout: this.timeoutMs(step) })) ?? "";
     if (!text.includes(expected)) {
       await this.input.visual.highlight(page, locator, "failed");
       throw new Error(`文本断言失败：期望包含「${expected}」，实际为「${text.trim()}」`);
@@ -280,7 +290,7 @@ export class WebExecutor {
     if (!step.variable) {
       throw new Error("web_extract 必须指定 variable");
     }
-    const value = ((await (await this.locator(page, step)).textContent({ timeout: step.timeout_ms ?? 10_000 })) ?? "").trim();
+    const value = ((await (await this.locator(page, step)).textContent({ timeout: this.timeoutMs(step) })) ?? "").trim();
     this.input.context.setVariable(step.variable, value);
   }
 
@@ -289,10 +299,71 @@ export class WebExecutor {
       throw new Error(`${step.type} 必须指定 target`);
     }
     const definition = this.input.locations[step.target];
-    if (!definition) {
-      throw new Error(`未找到定位定义：${step.target}`);
+    if (definition) {
+      return this.resolveLocator(page, definition, this.timeoutMs(step));
     }
-    return this.resolveLocator(page, definition, step.timeout_ms ?? 10_000);
+
+    return this.resolveInlineTarget(page, step);
+  }
+
+  private async resolveInlineTarget(page: Page, step: ScenarioStep): Promise<Locator> {
+    const target = this.resolve(step.target);
+    const timeoutMs = this.timeoutMs(step);
+    const plans = this.inlineTargetPlans(step.type, target);
+    const perCandidateTimeout = Math.max(800, Math.min(2_000, Math.floor(timeoutMs / plans.length)));
+    const failures: string[] = [];
+
+    for (const plan of plans) {
+      const locator = this.buildLocator(page, plan).first();
+      try {
+        await locator.waitFor({ state: "visible", timeout: perCandidateTimeout });
+        await this.input.logger.info(`未找到定位定义，已按页面文案兜底定位：${step.target}`, { stepId: step.step_id, locator: plan });
+        return locator;
+      } catch {
+        failures.push(`${plan.kind}=${plan.value}`);
+      }
+    }
+
+    throw new Error(`未找到定位定义或可见元素：${step.target}，已尝试：${failures.join(" -> ")}`);
+  }
+
+  private inlineTargetPlans(type: ScenarioStep["type"], target: string): LocatorPlan[] {
+    const selectorPlan = inlineSelectorPlan(target);
+    if (selectorPlan) {
+      return [selectorPlan];
+    }
+
+    const xpathTarget = xpathLiteral(target);
+    const textPlans: LocatorPlan[] = [
+      { kind: "text", value: target },
+      { kind: "role", value: "button", name: target }
+    ];
+    if (type === "web_input") {
+      return [
+        { kind: "label", value: target },
+        { kind: "placeholder", value: target },
+        {
+          kind: "xpath",
+          value: `//*[normalize-space()=${xpathTarget}]/ancestor::*[contains(@class,'form-item') or contains(@class,'el-form-item') or self::label][1]//input[not(@type='hidden')]`
+        },
+        {
+          kind: "xpath",
+          value: `//*[contains(normalize-space(),${xpathTarget})]/following::input[not(@type='hidden')][1]`
+        },
+        { kind: "text", value: target },
+        { kind: "css", value: `[name="${target}"]` }
+      ];
+    }
+    if (type === "web_upload") {
+      return [
+        {
+          kind: "xpath",
+          value: `//*[contains(normalize-space(),${xpathTarget})]/ancestor::*[contains(@class,'upload') or contains(@class,'form-item') or contains(@class,'el-form-item')][1]//input[@type='file']`
+        },
+        { kind: "text", value: target }
+      ];
+    }
+    return textPlans;
   }
 
   private async resolveLocator(page: Page, definition: LocationDefinition, timeoutMs: number): Promise<Locator> {
@@ -329,7 +400,7 @@ export class WebExecutor {
   }
 
   private async waitForLoginCompleted(page: Page, usernameLocator: Locator, step: ScenarioStep, diagnostics: LoginDiagnostics): Promise<void> {
-    const timeoutMs = Number(process.env.FLOW_LOGIN_TIMEOUT_MS ?? step.timeout_ms ?? 15_000);
+    const timeoutMs = Number(process.env.FLOW_LOGIN_TIMEOUT_MS ?? step.timeout_ms ?? this.input.defaults?.step_timeout_ms ?? 15_000);
     const startUrl = page.url();
 
     await page.waitForLoadState("networkidle", { timeout: Math.min(timeoutMs, 5_000) }).catch(() => undefined);
@@ -412,8 +483,26 @@ export class WebExecutor {
     return filePath;
   }
 
+  private timeoutMs(step: ScenarioStep): number {
+    return step.timeout_ms ?? this.input.defaults?.step_timeout_ms ?? 10_000;
+  }
+
+  private async waitForNetworkIfNeeded(page: Page, step: ScenarioStep): Promise<void> {
+    if (!(step.wait_for_network ?? this.input.defaults?.wait_for_network)) {
+      return;
+    }
+    await page.waitForLoadState("networkidle", { timeout: this.timeoutMs(step) }).catch(() => undefined);
+  }
+
   private resolve(value: string | undefined): string {
     return resolveVariables(value, this.input.context.state);
+  }
+
+  private stringField(value: unknown, fieldName: string): string | undefined {
+    if (value === undefined || typeof value === "string") {
+      return value;
+    }
+    throw new Error(`${fieldName} 必须是字符串`);
   }
 }
 
@@ -424,4 +513,34 @@ interface LoginDiagnostics {
 
 function isTargetClosedError(error: unknown): boolean {
   return error instanceof Error && /target page, context or browser has been closed/i.test(error.message);
+}
+
+function inlineSelectorPlan(target: string): LocatorPlan | undefined {
+  const trimmed = target.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (trimmed.startsWith("xpath=")) {
+    return { kind: "xpath", value: trimmed.slice("xpath=".length) };
+  }
+  if (trimmed.startsWith("//") || trimmed.startsWith("(//") || trimmed.startsWith("./") || trimmed.startsWith("../")) {
+    return { kind: "xpath", value: trimmed };
+  }
+  if (trimmed.startsWith("css=")) {
+    return { kind: "css", value: trimmed.slice("css=".length) };
+  }
+  if (/^[.#\[]/.test(trimmed) || /^[a-z][a-z0-9-]*(?:[.#[:\s>+~]|$)/i.test(trimmed)) {
+    return { kind: "css", value: trimmed };
+  }
+  return undefined;
+}
+
+function xpathLiteral(value: string): string {
+  if (!value.includes("'")) {
+    return `'${value}'`;
+  }
+  if (!value.includes("\"")) {
+    return `"${value}"`;
+  }
+  return `concat(${value.split("'").map((part) => `'${part}'`).join(`,"'",`)})`;
 }

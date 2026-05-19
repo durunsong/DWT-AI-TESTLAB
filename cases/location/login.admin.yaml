@@ -21,3 +21,22 @@ admin_home_marker:
   fallback:
     - text: "首页"
     - text: "控制台"
+admin_avatar_upload:
+  fallback:
+    - xpath: "//div[contains(@class, 'avatar-upload')]"
+admin_profile_username:
+  fallback:
+    - css: "input[name='username']"
+    - xpath: "//input[@name='username']"
+admin_profile_password:
+  fallback:
+    - css: "input[type='password']"
+    - xpath: "//input[@type='password']"
+admin_profile_save:
+  fallback:
+    - role: "button"
+      name: "保存"
+    - text: "保存"
+admin_profile_success_message:
+  fallback:
+    - text: "保存成功"

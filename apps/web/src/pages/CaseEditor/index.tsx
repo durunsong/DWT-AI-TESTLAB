@@ -1,0 +1,444 @@
+import { useEffect, useState } from "react";
+import { Alert, Button, Card, Col, Drawer, Form, Input, List, Row, Segmented, Space, Spin, Tag, Typography, message } from "antd";
+import { ArrowLeftOutlined, CheckCircleOutlined, CopyOutlined, PlayCircleOutlined, RobotOutlined, SaveOutlined } from "@ant-design/icons";
+import { useNavigate, useParams } from "react-router-dom";
+import { assistCaseYamlStream, type CaseYamlAssistMode } from "../../api/ai";
+import { getCase, saveCase, validateCase } from "../../api/cases";
+import { createTestRun } from "../../api/testRuns";
+import { PageHeader } from "../../components/PageHeader";
+import { YamlEditor } from "../../components/YamlEditor";
+import { useCaseStore } from "../../stores/useCaseStore";
+import { useSettingStore } from "../../stores/useSettingStore";
+import type { CaseValidationResult } from "../../types/case";
+
+const aiModeOptions: Array<{ label: string; value: CaseYamlAssistMode }> = [
+  { label: "AI 写", value: "write" },
+  { label: "续写", value: "continue" },
+  { label: "优化", value: "optimize" },
+  { label: "修复", value: "fix" }
+];
+
+const aiModeTips: Record<CaseYamlAssistMode, string> = {
+  write: "按你的业务说明生成完整 YAML，适合从草稿重建。",
+  continue: "保留当前 YAML，在 steps 后面补充新流程。",
+  optimize: "整理命名、等待、断言和步骤顺序，不改变业务含义。",
+  fix: "结合当前 DSL 校验问题修复 YAML。"
+};
+
+interface CaseMetaFormValues {
+  caseId: string;
+  caseName: string;
+  description?: string;
+}
+
+export default function CaseEditor() {
+  const { caseId = "" } = useParams();
+  const navigate = useNavigate();
+  const [messageApi, contextHolder] = message.useMessage();
+  const { activeCase, yaml, validation, setActiveCase, setYaml, setValidation } = useCaseStore();
+  const { env } = useSettingStore();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiMode, setAiMode] = useState<CaseYamlAssistMode>("continue");
+  const [aiInstruction, setAiInstruction] = useState("");
+  const [aiDraft, setAiDraft] = useState("");
+  const [aiStreaming, setAiStreaming] = useState(false);
+  const [aiValidation, setAiValidation] = useState<CaseValidationResult>();
+  const [aiError, setAiError] = useState("");
+
+  useEffect(() => {
+    if (!caseId) return;
+    setLoading(true);
+    getCase(caseId)
+      .then((detail) => {
+        setActiveCase(detail);
+        setValidation(detail.validation);
+      })
+      .catch((error) => messageApi.error(error instanceof Error ? error.message : String(error)))
+      .finally(() => setLoading(false));
+  }, [caseId, messageApi, setActiveCase, setValidation]);
+
+  async function handleValidate() {
+    try {
+      const result = await validateCase(yaml);
+      setValidation(result);
+      if (result.valid) {
+        messageApi.success("DSL 校验通过");
+      } else {
+        messageApi.warning("DSL 仍有校验问题");
+      }
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const result = await saveCase(caseId, yaml);
+      setValidation(result.validation);
+      if (result.saved) {
+        messageApi.success("保存成功");
+        if (result.caseId && result.caseId !== caseId) {
+          navigate(`/cases/${result.caseId}`, { replace: true });
+        }
+      } else {
+        messageApi.error("保存失败，请先修复校验问题");
+      }
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleMetaChange(_: Partial<CaseMetaFormValues>, values: CaseMetaFormValues) {
+    setYaml(updateYamlMeta(yaml, {
+      caseId: normalizeCaseId(values.caseId),
+      caseName: values.caseName,
+      description: values.description
+    }));
+  }
+
+  async function handleRun() {
+    setRunning(true);
+    try {
+      const validationResult = await validateCase(yaml);
+      setValidation(validationResult);
+      if (!validationResult.valid) {
+        messageApi.error("DSL 校验失败，请先修复后再执行");
+        return;
+      }
+
+      const result = await createTestRun({ caseId, env });
+      navigate(`/runs/${result.runId}`);
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  function openAiAssistant(mode: CaseYamlAssistMode = aiMode) {
+    setAiMode(mode);
+    setAiOpen(true);
+    setAiError("");
+    if (!aiDraft) {
+      setAiDraft("");
+      setAiValidation(undefined);
+    }
+  }
+
+  async function handleAiGenerate() {
+    setAiStreaming(true);
+    setAiDraft("");
+    setAiValidation(undefined);
+    setAiError("");
+
+    let nextDraft = "";
+    let streamError: Error | undefined;
+    try {
+      await assistCaseYamlStream(
+        {
+          mode: aiMode,
+          caseId,
+          currentYaml: yaml,
+          instruction: aiInstruction,
+          validationIssues: validation?.issues
+        },
+        {
+          onChunk: (chunk) => {
+            nextDraft += chunk;
+            setAiDraft(nextDraft);
+          },
+          onError: (error) => {
+            streamError = error;
+          }
+        }
+      );
+      if (streamError) throw streamError;
+
+      const normalized = normalizeAiYaml(nextDraft);
+      setAiDraft(normalized);
+      const result = await validateCase(normalized);
+      setAiValidation(result);
+      if (result.valid) {
+        messageApi.success("AI YAML 已生成并通过校验");
+      } else {
+        messageApi.warning("AI YAML 已生成，但仍有校验问题，请确认后再应用");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setAiError(message);
+      messageApi.error(message);
+    } finally {
+      setAiStreaming(false);
+    }
+  }
+
+  async function handleApplyAiDraft() {
+    const normalized = normalizeAiYaml(aiDraft);
+    if (!normalized) return;
+    const result = aiValidation ?? await validateCase(normalized);
+    if (!result.valid) {
+      setAiValidation(result);
+      messageApi.warning("AI YAML 仍未通过校验，请修复后再应用");
+      return;
+    }
+    setYaml(normalized);
+    setValidation(result);
+    setAiOpen(false);
+    messageApi.success("AI YAML 已应用到编辑器，请确认后保存");
+  }
+
+  async function copyAiDraft() {
+    if (!aiDraft) return;
+    await navigator.clipboard.writeText(normalizeAiYaml(aiDraft));
+    messageApi.success("AI YAML 已复制");
+  }
+
+  if (loading) {
+    return (
+      <div className="flex min-h-full flex-col gap-4">
+        {contextHolder}
+        <PageHeader title="用例编辑" description={caseId} />
+        <Card className="min-h-[420px]">
+          <div className="flex min-h-[360px] items-center justify-center">
+            <Spin tip="读取用例中">
+              <div className="h-12 w-36" />
+            </Spin>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-full flex-col gap-4">
+      {contextHolder}
+      <PageHeader
+        title={activeCase?.caseName ?? caseId}
+        description={activeCase?.file}
+        extra={
+          <>
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/cases")}>
+              返回
+            </Button>
+            <Button icon={<CheckCircleOutlined />} onClick={() => void handleValidate()}>
+              校验
+            </Button>
+            <Button icon={<RobotOutlined />} onClick={() => openAiAssistant()}>
+              AI 助手
+            </Button>
+            <Button icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
+              保存
+            </Button>
+            <Button type="primary" icon={<PlayCircleOutlined />} loading={running} onClick={() => void handleRun()}>
+              执行
+            </Button>
+          </>
+        }
+      />
+      <Row gutter={[16, 16]}>
+        <Col xs={24} xl={16}>
+          <Card title="基础信息" size="small" className="mb-3 [&_.ant-card-body]:py-3">
+            <Form<CaseMetaFormValues>
+              key={activeCase?.caseId}
+              layout="vertical"
+              className="[&_.ant-form-item]:mb-0"
+              initialValues={{
+                caseId: activeCase?.caseId,
+                caseName: activeCase?.caseName,
+                description: activeCase?.description ?? ""
+              }}
+              onValuesChange={handleMetaChange}
+            >
+              <Row gutter={12}>
+                <Col span={8}>
+                  <Form.Item
+                    label="caseId"
+                    name="caseId"
+                    normalize={normalizeCaseId}
+                    rules={[
+                      { required: true, message: "请输入 caseId" },
+                      {
+                        pattern: /^[a-z][a-z0-9_-]{2,63}$/,
+                        message: "只能使用小写字母、数字、下划线或中划线，且必须以小写字母开头，长度 3-64 位"
+                      }
+                    ]}
+                  >
+                    <Input size="small" placeholder="例如 admin_profile_update" />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item label="名称" name="caseName" rules={[{ required: true, message: "请输入名称" }]}>
+                    <Input size="small" placeholder="例如 admin 修改资料" />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item label="说明" name="description">
+                    <Input size="small" placeholder="简要说明用例覆盖的流程或断言目标" />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </Form>
+          </Card>
+          <Card className="overflow-hidden [&_.ant-card-body]:p-0">
+            <YamlEditor value={yaml} onChange={setYaml} />
+          </Card>
+        </Col>
+        <Col xs={24} xl={8}>
+          <Card title="AI YAML 助手" className="mb-4">
+            <div className="flex flex-col gap-2.5">
+              <Typography.Text type="secondary">选择生成方式，AI 会先给出可校验草稿，确认后再应用到编辑器。</Typography.Text>
+              <Segmented<CaseYamlAssistMode> block value={aiMode} options={aiModeOptions} onChange={setAiMode} />
+              <Input.TextArea
+                rows={4}
+                value={aiInstruction}
+                placeholder="例如：续写 admin 审核 KYC，并在 user 端断言状态变为已通过"
+                onChange={(event) => setAiInstruction(event.target.value)}
+              />
+              <Button block type="primary" icon={<RobotOutlined />} className="mt-0.5" onClick={() => openAiAssistant(aiMode)}>
+                打开 AI 助手
+              </Button>
+            </div>
+          </Card>
+          <Card
+            title="DSL 校验结果"
+            extra={validation ? <Tag color={validation.valid ? "success" : "error"}>{validation.valid ? "通过" : "失败"}</Tag> : null}
+          >
+            {!validation ? (
+              <Alert type="info" showIcon message="尚未校验" description="保存会自动校验，也可以先手动校验 YAML DSL。" />
+            ) : validation.valid ? (
+              <Alert type="success" showIcon message="校验通过" description={`${validation.caseId ?? "-"} · ${validation.caseName ?? "-"}`} />
+            ) : (
+              <List
+                dataSource={validation.issues}
+                renderItem={(item) => (
+                  <List.Item>
+                    <List.Item.Meta title={item.path} description={item.message} />
+                  </List.Item>
+                )}
+              />
+            )}
+          </Card>
+        </Col>
+      </Row>
+      <Drawer
+        title="AI YAML 助手"
+        width="min(920px, 92vw)"
+        open={aiOpen}
+        destroyOnHidden={false}
+        extra={
+          <Space wrap>
+            <Button icon={<CopyOutlined />} disabled={!aiDraft} onClick={() => void copyAiDraft()}>
+              复制
+            </Button>
+            <Button disabled={!aiDraft || aiStreaming} onClick={() => void handleApplyAiDraft()}>
+              应用到编辑器
+            </Button>
+            <Button type="primary" icon={<RobotOutlined />} loading={aiStreaming} onClick={() => void handleAiGenerate()}>
+              {aiDraft ? "重新生成" : "生成"}
+            </Button>
+          </Space>
+        }
+        onClose={() => setAiOpen(false)}
+      >
+        <div className="grid h-full min-h-0 grid-cols-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+          <div className="space-y-4">
+            <Card size="small" title="生成模式">
+              <Space direction="vertical" size={12} className="w-full">
+                <Segmented<CaseYamlAssistMode> block value={aiMode} options={aiModeOptions} onChange={setAiMode} />
+                <Alert type="info" showIcon message={aiModeTips[aiMode]} />
+              </Space>
+            </Card>
+            <Card size="small" title="补充要求">
+              <Input.TextArea
+                rows={8}
+                value={aiInstruction}
+                placeholder="描述你要 AI 写什么、续写什么，或需要修复的问题。"
+                onChange={(event) => setAiInstruction(event.target.value)}
+              />
+            </Card>
+            {aiValidation ? (
+              <Alert
+                type={aiValidation.valid ? "success" : "warning"}
+                showIcon
+                message={aiValidation.valid ? "草稿校验通过" : "草稿仍需调整"}
+                description={aiValidation.valid ? `${aiValidation.caseId ?? "-"} · ${aiValidation.caseName ?? "-"}` : `${aiValidation.issues.length} 个问题`}
+              />
+            ) : null}
+            {aiError ? <Alert type="error" showIcon message="AI 生成失败" description={aiError} /> : null}
+          </div>
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-950">
+            <div className="flex min-h-[44px] items-center justify-between border-b border-slate-800 px-3 text-slate-200">
+              <span>AI YAML 预览</span>
+              <Tag color={aiStreaming ? "processing" : aiValidation?.valid ? "success" : aiDraft ? "warning" : "default"}>
+                {aiStreaming ? "生成中" : aiValidation?.valid ? "可应用" : aiDraft ? "待确认" : "未生成"}
+              </Tag>
+            </div>
+            <pre className="m-0 min-h-[520px] flex-1 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-6 text-slate-200">
+              {aiDraft || "选择模式并点击生成后，AI 会在这里流式输出 YAML 草稿。"}
+            </pre>
+          </div>
+        </div>
+      </Drawer>
+    </div>
+  );
+}
+
+function normalizeAiYaml(content: string): string {
+  return content
+    .replace(/^\s*```(?:yaml|yml)?\s*/i, "")
+    .replace(/\s*```\s*$/i, "")
+    .trim()
+    .concat("\n");
+}
+
+function updateYamlMeta(content: string, meta: { caseId: string; caseName: string; description?: string }): string {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const nextLines = upsertYamlScalar(lines, "case_id", meta.caseId);
+  const withName = upsertYamlScalar(nextLines, "case_name", meta.caseName);
+  return upsertYamlScalar(withName, "description", meta.description?.trim() ?? "").join("\n");
+}
+
+function upsertYamlScalar(lines: string[], key: "case_id" | "case_name" | "description", value: string): string[] {
+  const next = [...lines];
+  const lineIndex = next.findIndex((line) => line.startsWith(`${key}:`));
+  if (!value && key === "description") {
+    if (lineIndex >= 0) {
+      next.splice(lineIndex, 1);
+    }
+    return next;
+  }
+
+  const line = `${key}: ${quoteYamlScalar(value)}`;
+  if (lineIndex >= 0) {
+    next[lineIndex] = line;
+    return next;
+  }
+
+  const insertIndex = key === "case_id" ? 0 : key === "case_name" ? afterKey(next, "case_id") : afterKey(next, "case_name");
+  next.splice(insertIndex, 0, line);
+  return next;
+}
+
+function afterKey(lines: string[], key: string): number {
+  const index = lines.findIndex((line) => line.startsWith(`${key}:`));
+  return index >= 0 ? index + 1 : 0;
+}
+
+function quoteYamlScalar(value: string): string {
+  return JSON.stringify(value);
+}
+
+function normalizeCaseId(value?: string): string {
+  return (value ?? "")
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .replace(/_+/g, "_")
+    .toLowerCase();
+}

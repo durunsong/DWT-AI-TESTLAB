@@ -1,0 +1,177 @@
+@import "tailwindcss";
+
+@layer base {
+  html {
+    font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+  }
+
+  body {
+    overflow: hidden;
+    min-width: 1024px;
+    margin: 0;
+    background: #eef2f7;
+    color: #172033;
+  }
+
+  #root {
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  a {
+    color: #1677ff;
+  }
+}
+
+@layer components {
+  .ai-thinking {
+    display: inline-flex;
+    min-height: 32px;
+    align-items: center;
+    gap: 10px;
+    color: #d7e2f2;
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  .ai-thinking__icon {
+    position: relative;
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    border-radius: 999px;
+  }
+
+  .ai-thinking__icon::before,
+  .ai-thinking__icon::after {
+    position: absolute;
+    inset: 0;
+    box-sizing: border-box;
+    border-radius: inherit;
+    content: "";
+  }
+
+  .ai-thinking__icon::before {
+    border: 2px solid rgb(16 163 127 / 18%);
+  }
+
+  .ai-thinking__icon::after {
+    border: 2px solid transparent;
+    border-right-color: #10a37f;
+    border-top-color: #10a37f;
+    animation: ai-thinking-spin 0.9s linear infinite;
+  }
+
+  .ai-thinking__text {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    overflow: hidden;
+    color: #f8fafc;
+  }
+
+  .ai-thinking__text::after {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -45%;
+    width: 38%;
+    background: linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 10%) 20%, rgb(255 255 255 / 75%) 50%, rgb(255 255 255 / 10%) 80%, transparent 100%);
+    content: "";
+    pointer-events: none;
+    transform: skewX(-18deg);
+    animation: ai-thinking-sweep 1.6s ease-in-out infinite;
+  }
+
+  .ai-thinking__dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: 2px;
+    transform: translateY(1px);
+  }
+
+  .ai-thinking__dots span {
+    width: 4px;
+    height: 4px;
+    border-radius: 999px;
+    background: #f8fafc;
+    opacity: 0.3;
+    animation: ai-thinking-dot 1.25s ease-in-out infinite;
+  }
+
+  .ai-thinking__dots span:nth-child(2) {
+    animation-delay: 0.16s;
+  }
+
+  .ai-thinking__dots span:nth-child(3) {
+    animation-delay: 0.32s;
+  }
+
+  .report-step-table .ant-table {
+    background: #fff;
+  }
+
+  .report-step-table .ant-table-thead > tr > th {
+    background: #f8fafc;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .report-step-table .ant-table-tbody > tr > td {
+    border-bottom-color: #edf2f7;
+    padding-bottom: 12px;
+    padding-top: 12px;
+  }
+
+  .report-step-table .ant-table-tbody > tr:hover > td {
+    background: #f8fafc;
+  }
+
+  .report-step-table__row--failed > td:first-child {
+    box-shadow: inset 3px 0 0 #ef4444;
+  }
+
+  .report-step-table__row--running > td:first-child {
+    box-shadow: inset 3px 0 0 #3b82f6;
+  }
+}
+
+@keyframes ai-thinking-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ai-thinking-sweep {
+  0% {
+    left: -45%;
+    opacity: 0;
+  }
+
+  18%,
+  58% {
+    opacity: 1;
+  }
+
+  100% {
+    left: 110%;
+    opacity: 0;
+  }
+}
+
+@keyframes ai-thinking-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+
+  40% {
+    opacity: 0.9;
+    transform: translateY(-3px);
+  }
+}

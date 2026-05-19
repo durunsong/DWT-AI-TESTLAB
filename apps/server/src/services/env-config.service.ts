@@ -1,0 +1,213 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import dotenv from "dotenv";
+import { ALLOWED_TEST_ENVS, type TestEnv } from "@ai-e2e/shared";
+
+export interface EnvVariable {
+  key: string;
+  value: string;
+  comment?: string;
+  source: "file" | "base" | "template";
+  sensitive: boolean;
+}
+
+export interface EnvFileConfig {
+  env: TestEnv;
+  fileName: string;
+  exists: boolean;
+  updatedAt?: string;
+  variables: EnvVariable[];
+  missingKeys: string[];
+}
+
+const ENV_FILE_BY_ENV: Record<TestEnv, string> = {
+  local: ".env.local",
+  dev: ".env.dev",
+  test: ".env.test",
+  sit: ".env.sit"
+};
+
+const SENSITIVE_PATTERN = /(password|token|secret|key|cookie|authorization|apikey)/i;
+const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+export class EnvConfigService {
+  private readonly baseEnvPath: string;
+  private readonly templateEnvPath: string;
+
+  constructor(private readonly rootDir: string) {
+    this.baseEnvPath = path.resolve(rootDir, ".env");
+    this.templateEnvPath = path.resolve(rootDir, ".env.example");
+  }
+
+  async list(): Promise<EnvFileConfig[]> {
+    return Promise.all(ALLOWED_TEST_ENVS.map((env) => this.get(env)));
+  }
+
+  async get(env: TestEnv): Promise<EnvFileConfig> {
+    const envFilePath = this.filePath(env);
+    const [template, base, current, stat] = await Promise.all([
+      this.readEnvFile(this.templateEnvPath),
+      this.readEnvFile(this.baseEnvPath),
+      this.readEnvFile(envFilePath),
+      fs.stat(envFilePath).catch(() => undefined)
+    ]);
+    const merged = new Map<string, EnvVariable>();
+
+    for (const variable of template.variables) {
+      merged.set(variable.key, { ...variable, source: "template" });
+    }
+    for (const variable of base.variables) {
+      merged.set(variable.key, { ...variable, source: "base" });
+    }
+    for (const variable of current.variables) {
+      merged.set(variable.key, { ...variable, source: "file" });
+    }
+
+    const missingKeys = template.variables
+      .map((variable) => variable.key)
+      .filter((key) => !current.values.has(key));
+
+    return {
+      env,
+      fileName: ENV_FILE_BY_ENV[env],
+      exists: current.exists,
+      updatedAt: stat?.mtime.toISOString(),
+      variables: [...merged.values()],
+      missingKeys
+    };
+  }
+
+  async save(env: TestEnv, variables: Array<Pick<EnvVariable, "key" | "value" | "comment">>): Promise<EnvFileConfig> {
+    const normalized = this.normalizeVariables(variables);
+    const filePath = this.filePath(env);
+    const content = [
+      `# ${env} environment config`,
+      "# Managed by /settings. Do not commit real secrets.",
+      "",
+      ...normalized.flatMap((variable) => [
+        ...(variable.comment ? variable.comment.split(/\r?\n/).map((line) => `# ${line.replace(/^#\s?/, "")}`) : []),
+        `${variable.key}=${serializeEnvValue(variable.value)}`
+      ]),
+      ""
+    ].join("\n");
+
+    await fs.writeFile(filePath, content, "utf8");
+    this.applyToProcessFromVariables(normalized);
+    process.env.TEST_ENV = env;
+    return this.get(env);
+  }
+
+  async applyToProcess(env: TestEnv): Promise<void> {
+    const base = await this.readEnvFile(this.baseEnvPath);
+    const current = await this.readEnvFile(this.filePath(env));
+    this.applyToProcessFromVariables([...base.variables, ...current.variables]);
+    process.env.TEST_ENV = env;
+  }
+
+  filePath(env: TestEnv): string {
+    return path.resolve(this.rootDir, ENV_FILE_BY_ENV[env]);
+  }
+
+  private async readEnvFile(filePath: string): Promise<{ exists: boolean; variables: EnvVariable[]; values: Map<string, string> }> {
+    const content = await fs.readFile(filePath, "utf8").catch((error: unknown) => {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        return undefined;
+      }
+      throw error;
+    });
+
+    if (content === undefined) {
+      return { exists: false, variables: [], values: new Map() };
+    }
+
+    const parsed = dotenv.parse(content);
+    const comments = collectComments(content);
+    const variables = Object.entries(parsed).map(([key, value]) => ({
+      key,
+      value,
+      comment: comments.get(key),
+      source: "file" as const,
+      sensitive: isSensitiveKey(key)
+    }));
+
+    return { exists: true, variables, values: new Map(Object.entries(parsed)) };
+  }
+
+  private normalizeVariables(variables: Array<Pick<EnvVariable, "key" | "value" | "comment">>): EnvVariable[] {
+    const result: EnvVariable[] = [];
+    const seen = new Set<string>();
+    for (const variable of variables) {
+      const key = variable.key.trim();
+      if (!key) continue;
+      if (!ENV_KEY_PATTERN.test(key)) {
+        throw new Error(`环境变量名不合法：${key}`);
+      }
+      if (seen.has(key)) {
+        throw new Error(`环境变量名重复：${key}`);
+      }
+      if (variable.value.includes("\n") || variable.value.includes("\r")) {
+        throw new Error(`环境变量值不能包含换行：${key}`);
+      }
+      seen.add(key);
+      result.push({
+        key,
+        value: variable.value,
+        comment: variable.comment?.trim(),
+        source: "file",
+        sensitive: isSensitiveKey(key)
+      });
+    }
+    return result;
+  }
+
+  private applyToProcessFromVariables(variables: Array<Pick<EnvVariable, "key" | "value">>): void {
+    for (const variable of variables) {
+      process.env[variable.key] = variable.value;
+    }
+  }
+}
+
+export function normalizeTestEnv(env: string): TestEnv {
+  if ((ALLOWED_TEST_ENVS as readonly string[]).includes(env)) {
+    return env as TestEnv;
+  }
+  throw new Error(`不支持的环境：${env}`);
+}
+
+function collectComments(content: string): Map<string, string> {
+  const comments = new Map<string, string>();
+  const pending: string[] = [];
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      pending.length = 0;
+      continue;
+    }
+    if (trimmed.startsWith("#")) {
+      pending.push(trimmed.replace(/^#\s?/, ""));
+      continue;
+    }
+    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+    if (match?.[1]) {
+      if (pending.length) {
+        comments.set(match[1], pending.join("\n"));
+      }
+      pending.length = 0;
+    }
+  }
+  return comments;
+}
+
+function serializeEnvValue(value: string): string {
+  if (value === "") return "";
+  if (/^[^\s#"'`=]+$/.test(value)) return value;
+  return JSON.stringify(value);
+}
+
+function isSensitiveKey(key: string): boolean {
+  return SENSITIVE_PATTERN.test(key);
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
+}

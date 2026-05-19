@@ -15,6 +15,10 @@ export interface ScenarioCase {
   case_name: string;
   description?: string;
   mode: ScenarioMode;
+  defaults?: {
+    step_timeout_ms?: number;
+    wait_for_network?: boolean;
+  };
   sessions: ScenarioSession[];
   variables?: Record<string, string>;
   locations: {
