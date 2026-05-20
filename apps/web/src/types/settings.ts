@@ -1,4 +1,4 @@
-export type TestEnv = "local" | "dev" | "test" | "sit";
+export type TestEnv = "local" | "dev" | "sit" | "prod";
 
 export interface EnvVariable {
   key: string;

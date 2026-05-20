@@ -18,6 +18,7 @@ export interface ScenarioCase {
   defaults?: {
     step_timeout_ms?: number;
     wait_for_network?: boolean;
+    manual_review_on_failure?: boolean;
   };
   sessions: ScenarioSession[];
   variables?: Record<string, string>;

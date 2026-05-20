@@ -16,7 +16,8 @@ export const scenarioCaseSchema = z.object({
   mode: z.enum(["web", "hybrid"]).default("web"),
   defaults: z.object({
     step_timeout_ms: z.number().int().positive().optional(),
-    wait_for_network: z.boolean().optional()
+    wait_for_network: z.boolean().optional(),
+    manual_review_on_failure: z.boolean().optional()
   }).optional(),
   sessions: z.array(scenarioSessionSchema).min(1),
   variables: z.record(z.string()).optional(),

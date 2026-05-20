@@ -22,9 +22,9 @@ export interface EnvFileConfig {
 
 const ENV_FILE_BY_ENV: Record<TestEnv, string> = {
   local: ".env.local",
-  dev: ".env.dev",
-  test: ".env.test",
-  sit: ".env.sit"
+  dev: ".env",
+  sit: ".env.sit",
+  prod: ".env.prod"
 };
 
 const SENSITIVE_PATTERN = /(password|token|secret|key|cookie|authorization|apikey)/i;

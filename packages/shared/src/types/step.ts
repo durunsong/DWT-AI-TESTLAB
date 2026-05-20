@@ -4,6 +4,43 @@ import type { StepType } from "../constants/step-types";
 export type StepStatus = "pending" | "running" | "passed" | "failed" | "skipped";
 export type DbParam = string | number | boolean | null;
 export type DbExpected = Record<string, string | number | boolean | null>;
+export type ApiExpectedValue = string | number | boolean | null;
+
+export interface ApiWaitConfig {
+  url: string;
+  method?: string;
+  timeout_ms?: number;
+  expected_status?: number;
+  business_code_path?: string;
+  success_codes?: ApiExpectedValue[];
+  failure_codes?: ApiExpectedValue[];
+  success?: {
+    body_path?: string;
+    equals?: ApiExpectedValue;
+    includes?: string;
+  };
+}
+
+export interface ApiResponseDiagnostic {
+  url: string;
+  method: string;
+  status: number;
+  statusText: string;
+  ok: boolean;
+  failed?: boolean;
+  failureReason?: string;
+  contentType?: string;
+  bodyText?: string;
+  bodyJson?: unknown;
+  matchedAt: string;
+}
+
+export interface AiFailureAnalysis {
+  status: "pending" | "completed" | "failed";
+  content?: string;
+  error?: string;
+  generatedAt?: string;
+}
 
 export interface ScenarioStep {
   step_id: string;
@@ -21,6 +58,7 @@ export interface ScenarioStep {
   row_index?: number;
   timeout_ms?: number;
   wait_for_network?: boolean;
+  wait_for_api?: ApiWaitConfig;
   continue_on_failure?: boolean;
   username?: string;
   password?: string;
@@ -43,4 +81,5 @@ export interface StepResult {
   url?: string;
   title?: string;
   data?: unknown;
+  aiAnalysis?: AiFailureAnalysis;
 }

@@ -372,7 +372,7 @@ export default function CaseList() {
   }
 
   return (
-    <div className="flex min-h-full flex-col gap-4">
+    <div className="flex min-h-full flex-col gap-2.5">
       {contextHolder}
       <PageHeader
         title="用例管理"
@@ -500,14 +500,14 @@ export default function CaseList() {
         destroyOnHidden
         forceRender
         maskClosable={!creating}
-        styles={{ body: { maxHeight: "72vh", overflowY: "auto", paddingRight: 8 } }}
+        styles={{ body: { maxHeight: "calc(100vh - 220px)", overflowY: "auto", paddingRight: 8, paddingBottom: 88 } }}
         onOk={() => void handleCreateCase()}
         onCancel={() => {
           if (!creating) setCreateOpen(false);
         }}
       >
         <Alert
-          className="mb-4"
+          className="mb-2.5"
           type="info"
           showIcon
           message={createMode === "ai" ? "AI 会根据资料生成可编辑的 YAML 用例" : "新建后会生成一份可校验的 YAML 草稿"}
@@ -558,7 +558,22 @@ export default function CaseList() {
           >
             <Input placeholder="例如 login_user_sit" allowClear />
           </Form.Item>
-          <Form.Item label="用例名称" name="caseName" rules={[{ required: true, message: "请输入用例名称" }]}>
+          <Form.Item
+            label="用例名称"
+            name="caseName"
+            rules={[
+              { required: true, message: "请输入用例名称" },
+              {
+                validator: (_, value: string) => {
+                  const normalized = normalizeCaseName(value);
+                  if (!normalized || !cases.some((item) => normalizeCaseName(item.caseName) === normalized)) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error("用例名称已存在"));
+                }
+              }
+            ]}
+          >
             <Input placeholder="例如 user 登录流程 - SIT" allowClear />
           </Form.Item>
           <Form.Item label="说明" name="description">
@@ -566,7 +581,7 @@ export default function CaseList() {
           </Form.Item>
           <Form.Item label="模板" name="template" rules={[{ required: true, message: "请选择模板" }]}>
             <Radio.Group className="w-full">
-              <div className="flex w-full flex-col gap-4">
+              <div className="flex w-full flex-col gap-2.5">
                 {templateOptions.map((option) => (
                   <label
                     key={option.value}
@@ -585,7 +600,7 @@ export default function CaseList() {
             </Radio.Group>
           </Form.Item>
           {createMode === "template" ? (
-            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-2.5 rounded-lg border border-slate-200 bg-slate-50 p-4">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <Typography.Text strong>继承步骤</Typography.Text>
@@ -709,6 +724,10 @@ function normalizeCaseId(value?: string): string {
     .toLowerCase();
 }
 
+function normalizeCaseName(value?: string): string {
+  return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 function cloneTemplateSteps(template: CreateCaseTemplate): ScenarioStep[] {
   return templateDrafts[template].steps.map((step) => ({ ...step }));
 }
@@ -750,6 +769,7 @@ function renderStepYaml(step: ScenarioStep): string[] {
     "row_index",
     "timeout_ms",
     "wait_for_network",
+    "wait_for_api",
     "continue_on_failure",
     "username",
     "password",
@@ -768,19 +788,29 @@ function renderStepYaml(step: ScenarioStep): string[] {
 }
 
 function renderYamlField(field: string, value: unknown): string[] {
+  return renderYamlValue(field, value, 4);
+}
+
+function renderYamlValue(field: string, value: unknown, indent: number): string[] {
+  const spaces = " ".repeat(indent);
   if (Array.isArray(value)) {
     if (!value.length) {
-      return [`    ${field}: []`];
+      return [`${spaces}${field}: []`];
     }
-    return [`    ${field}:`, ...value.map((item) => `      - ${renderYamlScalar(item)}`)];
+    return [`${spaces}${field}:`, ...value.map((item) => `${" ".repeat(indent + 2)}- ${renderYamlScalar(item)}`)];
   }
   if (value && typeof value === "object") {
     return [
-      `    ${field}:`,
-      ...Object.entries(value).map(([key, item]) => `      ${key}: ${renderYamlScalar(item)}`)
+      `${spaces}${field}:`,
+      ...Object.entries(value).flatMap(([key, item]) => {
+        if (item && typeof item === "object" && !Array.isArray(item)) {
+          return renderYamlValue(key, item, indent + 2);
+        }
+        return [`${" ".repeat(indent + 2)}${key}: ${renderYamlScalar(item)}`];
+      })
     ];
   }
-  return [`    ${field}: ${renderYamlScalar(value)}`];
+  return [`${spaces}${field}: ${renderYamlScalar(value)}`];
 }
 
 function renderYamlScalar(value: unknown): string {

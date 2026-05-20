@@ -21,7 +21,7 @@ export function MarkdownViewer({ content, onCopyCode, className }: MarkdownViewe
 
   return (
     <div className={cn("text-sm leading-7 text-slate-100", className ?? "max-h-[62vh] min-h-[260px] overflow-auto rounded-lg bg-slate-950 p-5")}>
-      <div className="space-y-4">
+      <div className="space-y-2.5">
         {blocks.map((block, index) => renderBlock(block, index, onCopyCode))}
       </div>
     </div>

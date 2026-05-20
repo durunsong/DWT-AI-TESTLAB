@@ -75,6 +75,7 @@ export default function RunDetail() {
   }, [run?.status, runId, setLogs, setRun, setSummary, updateStep]);
 
   const data = useMemo(() => run?.steps ?? [], [run?.steps]);
+  const failureAnalysisStep = useMemo(() => data.find((step) => step.status === "failed" && step.aiAnalysis), [data]);
 
   async function handleAnalyze(step: StepResult) {
     if (!step.screenshot) return;
@@ -111,14 +112,14 @@ export default function RunDetail() {
 
   if (!runId) {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2.5">
         <PageHeader title="执行详情" description="暂无运行记录，请先从工作台启动一个用例。" />
       </div>
     );
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
+    <div className="flex h-full min-h-0 flex-col gap-2.5 overflow-y-auto overflow-x-hidden pr-1">
       {contextHolder}
       <PageHeader
         title="执行详情"
@@ -148,16 +149,50 @@ export default function RunDetail() {
           }
         />
       ) : null}
-      <Row gutter={[16, 16]} className="min-h-0 flex-1 overflow-y-auto xl:overflow-hidden">
-        <Col xs={24} xl={15} xxl={16} className="min-h-0 overflow-visible pr-0 xl:overflow-y-auto xl:overflow-x-hidden xl:pr-1">
-          <Space direction="vertical" size={16} className="w-full pb-1">
+      <Row gutter={[10, 10]} className="min-h-0 flex-none overflow-visible pb-2.5">
+        <Col xs={24} xl={15} xxl={16} className="min-h-0 overflow-visible pr-0 xl:pr-1">
+          <Space direction="vertical" size={10} className="w-full pb-1">
             <RunStatusCard run={run} />
-            <Card title="步骤明细">
+            {failureAnalysisStep ? (
+              <Card
+                title={
+                  <Space>
+                    <RobotOutlined />
+                    <span>自动失败分析</span>
+                    <Tag color="error">{failureAnalysisStep.stepId}</Tag>
+                  </Space>
+                }
+                extra={
+                  failureAnalysisStep.aiAnalysis?.content ? (
+                    <Button size="small" onClick={() => void copyText(failureAnalysisStep.aiAnalysis?.content ?? "", "AI 分析已复制")}>
+                      复制全部
+                    </Button>
+                  ) : null
+                }
+              >
+                {failureAnalysisStep.aiAnalysis?.status === "pending" ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                    <AiThinking />
+                  </div>
+                ) : failureAnalysisStep.aiAnalysis?.status === "completed" && failureAnalysisStep.aiAnalysis.content ? (
+                  <MarkdownViewer
+                    content={failureAnalysisStep.aiAnalysis.content}
+                    className="max-h-[460px] min-h-[300px] overflow-auto rounded-lg bg-slate-950 p-5"
+                    onCopyCode={(code) => void copyText(code, "代码块已复制")}
+                  />
+                ) : (
+                  <Alert type="warning" showIcon message="AI 分析失败" description={failureAnalysisStep.aiAnalysis?.error ?? "未返回分析结果"} />
+                )}
+              </Card>
+            ) : null}
+            <Card title="步骤明细" className="run-detail-step-card shrink-0 [&_.ant-card-body]:overflow-hidden">
               <Table<StepResult>
+                className="run-detail-step-table"
                 rowKey="stepId"
                 dataSource={data}
                 pagination={false}
-                scroll={{ x: 1380 }}
+                sticky
+                scroll={{ x: 1760, y: 360 }}
                 columns={[
                   { title: "#", width: 56, render: (_, __, index) => index + 1 },
                   { title: "step_id", dataIndex: "stepId", width: 220 },
@@ -167,24 +202,51 @@ export default function RunDetail() {
                   { title: "状态", dataIndex: "status", width: 100, render: (value) => <Tag color={statusColor(value)}>{statusText(value)}</Tag> },
                   { title: "开始时间", dataIndex: "startedAt", width: 120, render: formatTime },
                   { title: "耗时", dataIndex: "durationMs", width: 100, render: formatDuration },
-                  { title: "数据", dataIndex: "data", width: 160, render: renderStepData },
-                  { title: "错误摘要", dataIndex: "error", ellipsis: true, render: (value) => value ?? "-" },
+                  { title: "数据/接口", dataIndex: "data", width: 180, render: renderStepData },
                   {
-                    title: "截图",
-                    width: 170,
+                    title: "错误摘要",
+                    dataIndex: "error",
+                    width: 320,
+                    render: (value?: string) =>
+                      value ? (
+                        <Tooltip title={<pre className="m-0 max-w-[640px] whitespace-pre-wrap text-xs">{value}</pre>}>
+                          <Typography.Text type="danger" ellipsis className="!block">
+                            {value}
+                          </Typography.Text>
+                        </Tooltip>
+                      ) : (
+                        <span className="text-slate-400">-</span>
+                      )
+                  },
+                  {
+                    title: "诊断",
+                    width: 230,
                     render: (_, record) =>
-                      record.screenshot ? (
-                        <Space>
-                          <Button
-                            type="link"
-                            size="small"
-                            onClick={() => setScreenshotPreview({ title: record.stepId, src: toScreenshotUrl(record.screenshot!) })}
-                          >
-                            查看
-                          </Button>
-                          <Button size="small" icon={<RobotOutlined />} loading={aiLoadingStep === record.stepId} onClick={() => void handleAnalyze(record)}>
-                            AI
-                          </Button>
+                      record.screenshot || record.aiAnalysis ? (
+                        <Space wrap>
+                          {record.aiAnalysis?.status === "pending" ? (
+                            <Tag color="processing">AI 分析中</Tag>
+                          ) : record.aiAnalysis?.status === "completed" ? (
+                            <Tag color="success">AI 已分析</Tag>
+                          ) : record.aiAnalysis?.status === "failed" ? (
+                            <Tooltip title={record.aiAnalysis.error}>
+                              <Tag color="error">AI 失败</Tag>
+                            </Tooltip>
+                          ) : null}
+                          {record.screenshot ? (
+                            <>
+                              <Button
+                                type="link"
+                                size="small"
+                                onClick={() => setScreenshotPreview({ title: record.stepId, src: toScreenshotUrl(record.screenshot!) })}
+                              >
+                                查看
+                              </Button>
+                              <Button size="small" icon={<RobotOutlined />} loading={aiLoadingStep === record.stepId} onClick={() => void handleAnalyze(record)}>
+                                AI
+                              </Button>
+                            </>
+                          ) : null}
                         </Space>
                       ) : "-"
                   }
@@ -193,8 +255,8 @@ export default function RunDetail() {
             </Card>
           </Space>
         </Col>
-        <Col xs={24} xl={9} xxl={8} className="min-h-0 pr-0 xl:max-h-full xl:overflow-y-auto xl:overflow-x-hidden xl:pr-1">
-          <div className="flex min-h-0 flex-col gap-4 pb-1">
+        <Col xs={24} xl={9} xxl={8} className="min-h-0 pr-0 xl:pr-1">
+          <div className="flex min-h-0 flex-col gap-2.5 pb-1">
             <Card
               title="步骤时间线"
               className="h-[300px] shrink-0 overflow-hidden [&_.ant-card-body]:h-[236px] [&_.ant-card-body]:overflow-auto [&_.ant-card-body]:pr-2"
@@ -225,7 +287,7 @@ export default function RunDetail() {
       >
         <div className="max-h-[62vh] min-h-[260px] overflow-auto rounded-lg bg-slate-950 p-5">
           {aiLoadingStep ? (
-            <div className="mb-4 rounded-lg border border-slate-700 bg-slate-900 px-4 py-3">
+            <div className="mb-2.5 rounded-lg border border-slate-700 bg-slate-900 px-4 py-3">
               <AiThinking />
             </div>
           ) : null}

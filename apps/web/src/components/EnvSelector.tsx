@@ -4,8 +4,8 @@ import type { TestEnv } from "../types/settings";
 const options: Array<{ label: string; value: TestEnv }> = [
   { label: "local", value: "local" },
   { label: "dev", value: "dev" },
-  { label: "test", value: "test" },
-  { label: "sit", value: "sit" }
+  { label: "sit", value: "sit" },
+  { label: "prod", value: "prod" }
 ];
 
 interface EnvSelectorProps {

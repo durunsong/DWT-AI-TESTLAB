@@ -9,16 +9,15 @@ test("EnvConfigService merges template, base and env-specific values", async () 
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "env-config-"));
   await fs.writeFile(path.join(rootDir, ".env.example"), "TEST_ENV=local\nUSER_LOGIN_URL=\nUSER_PASSWORD=\n", "utf8");
   await fs.writeFile(path.join(rootDir, ".env"), "USER_LOGIN_URL=http://base.local\nUSER_PASSWORD=base-password\n", "utf8");
-  await fs.writeFile(path.join(rootDir, ".env.dev"), "USER_LOGIN_URL=http://dev.local\n", "utf8");
 
   const service = new EnvConfigService(rootDir);
   const config = await service.get("dev");
 
-  assert.equal(config.fileName, ".env.dev");
+  assert.equal(config.fileName, ".env");
   assert.equal(config.exists, true);
-  assert.equal(config.variables.find((item) => item.key === "USER_LOGIN_URL")?.value, "http://dev.local");
-  assert.equal(config.variables.find((item) => item.key === "USER_PASSWORD")?.source, "base");
-  assert.deepEqual(config.missingKeys, ["TEST_ENV", "USER_PASSWORD"]);
+  assert.equal(config.variables.find((item) => item.key === "USER_LOGIN_URL")?.value, "http://base.local");
+  assert.equal(config.variables.find((item) => item.key === "USER_PASSWORD")?.source, "file");
+  assert.deepEqual(config.missingKeys, ["TEST_ENV"]);
 });
 
 test("EnvConfigService saves env files and applies selected env to process.env", async () => {

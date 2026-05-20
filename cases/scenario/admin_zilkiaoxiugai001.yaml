@@ -1,10 +1,9 @@
-case_id: "admin_zilkiaoxiugai001"
-case_name: "admin 修改资料"
-description: "http://localhost:5173/admin/#/admin/sys/perinfo 页面编辑个人信息--个人资料"
-mode: web
 defaults:
   step_timeout_ms: 60000
   wait_for_network: true
+case_id: admin_zilkiaoxiugai001
+case_name: admin 修改资料001
+mode: web
 sessions:
   - name: admin
     login_url: ${env.ADMIN_LOGIN_URL}
@@ -19,40 +18,44 @@ steps:
     session: admin
     url: ${session.login_url}
   - step_id: admin_flow_login
-    name: admin 登录
+    name: admin 执行登录
     type: flow_login
     session: admin
     username: ${session.username}
     password: ${session.password}
-  - step_id: admin_open_perinfo
+  - step_id: admin_open_profile
     name: admin 打开个人信息页
     type: web_open
     session: admin
     url: ${session.login_url}#/admin/sys/perinfo
-  - step_id: admin_click_basic_info
-    name: admin 点击基本资料
-    type: web_click
-    session: admin
-    target: 基本资料
-  - step_id: admin_input_username
+  - step_id: admin_edit_username
     name: admin 修改用户名称
     type: web_input
     session: admin
-    target: 用户名称
-    value: admin_updated
-  - step_id: admin_input_password
-    name: admin 输入登录密码
+    target: admin_profile_username
+    value: test_admin_updated
+  - step_id: admin_edit_password
+    name: admin 修改登录密码
     type: web_input
     session: admin
-    target: 登录密码
-    value: ${session.password}
+    target: admin_profile_password
+    value: NewSecurePass123!
   - step_id: admin_click_save
     name: admin 点击保存
     type: web_click
     session: admin
-    target: 保存
-  - step_id: admin_assert_success
-    name: admin 断言个人信息页可见
-    type: web_assert_visible
+    target: admin_profile_save
+    wait_for_network: true
+    wait_for_api:
+      method: POST
+      url: /admin/user/profile/update
+      expected_status: 200
+      success:
+        body_path: code
+        equals: 0
+  - step_id: admin_verify_success
+    name: admin 验证保存成功
+    type: web_assert_text
     session: admin
-    target: 个人信息
+    target: admin_profile_success_message
+    expected: 修改成功

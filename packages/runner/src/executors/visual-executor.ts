@@ -10,13 +10,15 @@ export class VisualExecutor {
     }
     await page.addStyleTag({
       content: `
-        #ai-e2e-pointer,#ai-e2e-highlight,#ai-e2e-step-panel,.ai-e2e-ripple{pointer-events:none;z-index:2147483647}
-        #ai-e2e-pointer{position:fixed;width:18px;height:18px;border:2px solid #111827;border-radius:999px;background:#22d3ee;box-shadow:0 0 0 4px rgba(34,211,238,.28);transform:translate(-50%,-50%);transition:left .25s ease,top .25s ease}
-        #ai-e2e-highlight{position:fixed;border:3px solid #f59e0b;border-radius:8px;box-shadow:0 0 0 4px rgba(245,158,11,.18);transition:all .18s ease}
-        #ai-e2e-step-panel{position:fixed;right:18px;bottom:18px;max-width:360px;padding:12px 14px;border-radius:8px;background:rgba(17,24,39,.92);color:white;font:13px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 18px 40px rgba(15,23,42,.26)}
+        #ai-e2e-pointer,#ai-e2e-highlight,#ai-e2e-step-panel,.ai-e2e-ripple{pointer-events:none}
+        #ai-e2e-pointer{position:fixed;width:34px;height:42px;z-index:2147483647;filter:drop-shadow(0 10px 14px rgba(37,99,235,.35));transform:translate(-7px,-5px);transition:left .25s ease,top .25s ease}
+        #ai-e2e-pointer::before{content:"";position:absolute;inset:0;background:linear-gradient(135deg,#2563eb 0%,#7c3aed 58%,#ec4899 100%);clip-path:polygon(0 0,0 34px,10px 26px,17px 42px,26px 38px,19px 22px,32px 22px)}
+        #ai-e2e-pointer::after{content:"";position:absolute;inset:3px;background:#ffffff;clip-path:polygon(0 0,0 27px,8px 20px,14px 34px,19px 32px,13px 18px,24px 18px);opacity:.96}
+        #ai-e2e-highlight{position:fixed;z-index:2147483645;border:3px solid #f59e0b;border-radius:8px;box-shadow:0 0 0 4px rgba(245,158,11,.18);transition:all .18s ease}
+        #ai-e2e-step-panel{position:fixed;right:18px;bottom:18px;z-index:2147483646;max-width:360px;padding:12px 14px;border-radius:8px;background:rgba(17,24,39,.92);color:white;font:13px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 18px 40px rgba(15,23,42,.26)}
         #ai-e2e-step-panel strong{display:block;margin-bottom:4px;color:#f8fafc}
         #ai-e2e-step-panel span{color:#cbd5e1}
-        .ai-e2e-ripple{position:fixed;width:10px;height:10px;border-radius:999px;border:3px solid #38bdf8;animation:aiE2eRipple .55s ease-out forwards}
+        .ai-e2e-ripple{position:fixed;z-index:2147483646;width:10px;height:10px;border-radius:999px;border:3px solid #38bdf8;animation:aiE2eRipple .55s ease-out forwards}
         @keyframes aiE2eRipple{to{opacity:0;transform:scale(8)}}
       `
     }).catch(() => undefined);

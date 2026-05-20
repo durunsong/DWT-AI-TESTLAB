@@ -14,7 +14,15 @@ export interface StepResult {
   error?: string;
   screenshot?: string;
   trace?: string;
+  url?: string;
+  title?: string;
   data?: unknown;
+  aiAnalysis?: {
+    status: "pending" | "completed" | "failed";
+    content?: string;
+    error?: string;
+    generatedAt?: string;
+  };
 }
 
 export interface TestRunSummary {

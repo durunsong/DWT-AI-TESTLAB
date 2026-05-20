@@ -107,15 +107,22 @@ export class ScenarioOrchestrator {
           await this.emit(input.onEvent, { runId, type: "step_updated", status: "passed", step: stepResult, at: stepResult.endedAt });
         } catch (error) {
           const page = step.session && !this.isDbStep(step) ? await sessionManager.getPage(step.session).catch(() => undefined) : undefined;
+          const apiDiagnostic = readApiDiagnostic(error);
           if (page) {
-            Object.assign(stepResult, await webExecutor.captureFailure(page, step.step_id));
+            const failurePartial = await webExecutor.captureFailure(page, step.step_id);
+            Object.assign(stepResult, {
+              ...failurePartial,
+              data: mergeStepData(failurePartial.data, apiDiagnostic ? { api: apiDiagnostic } : undefined)
+            });
             await visual.updateStep(page, step, "failed");
+          } else if (apiDiagnostic) {
+            stepResult.data = mergeStepData(stepResult.data, { api: apiDiagnostic });
           }
           stepResult.status = "failed";
           stepResult.endedAt = new Date().toISOString();
           stepResult.durationMs = new Date(stepResult.endedAt).getTime() - new Date(stepResult.startedAt).getTime();
           stepResult.error = error instanceof Error ? error.message : String(error);
-          await logger.error(`步骤执行失败：${step.step_id}`, { error: stepResult.error });
+          await logger.error(`步骤执行失败：${step.step_id}`, { error: stepResult.error, data: stepResult.data });
           await this.emit(input.onEvent, { runId, type: "step_updated", status: "failed", step: stepResult, at: stepResult.endedAt });
           failed = !step.continue_on_failure;
         }
@@ -178,4 +185,21 @@ export class ScenarioOrchestrator {
   private async emit(handler: RunnerEventHandler | undefined, event: TestRunEvent): Promise<void> {
     await handler?.(event);
   }
+}
+
+function readApiDiagnostic(error: unknown): unknown | undefined {
+  if (!error || typeof error !== "object") {
+    return undefined;
+  }
+  return (error as { apiDiagnostic?: unknown }).apiDiagnostic;
+}
+
+function mergeStepData(left: unknown, right: Record<string, unknown> | undefined): unknown {
+  if (!right) {
+    return left;
+  }
+  if (!left || typeof left !== "object" || Array.isArray(left)) {
+    return right;
+  }
+  return { ...(left as Record<string, unknown>), ...right };
 }

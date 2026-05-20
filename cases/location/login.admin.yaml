@@ -28,10 +28,12 @@ admin_profile_username:
   fallback:
     - css: "input[name='username']"
     - xpath: "//input[@name='username']"
+    - xpath: "//*[normalize-space()='用户名称']/ancestor::*[contains(@class,'form-item') or contains(@class,'el-form-item')][1]//input[not(@type='hidden')]"
 admin_profile_password:
   fallback:
     - css: "input[type='password']"
     - xpath: "//input[@type='password']"
+    - xpath: "//*[normalize-space()='登录密码']/ancestor::*[contains(@class,'form-item') or contains(@class,'el-form-item')][1]//input[not(@type='hidden')]"
 admin_profile_save:
   fallback:
     - role: "button"
@@ -39,4 +41,5 @@ admin_profile_save:
     - text: "保存"
 admin_profile_success_message:
   fallback:
+    - text: "修改成功"
     - text: "保存成功"

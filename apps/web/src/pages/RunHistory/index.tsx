@@ -89,7 +89,7 @@ export default function RunHistory() {
   const totalCount = artifacts.reduce((sum, item) => sum + item.count, 0);
 
   return (
-    <div className="flex min-h-full flex-col gap-4">
+    <div className="flex min-h-full flex-col gap-2.5">
       {contextHolder}
       <PageHeader
         title="历史记录"
@@ -105,7 +105,7 @@ export default function RunHistory() {
         }
       />
       <Card title="运行产物">
-        <Row gutter={[12, 12]} className="mb-4">
+        <Row gutter={[10, 10]} className="mb-2.5">
           <Col xs={12} xl={6}>
             <Statistic title="历史运行" value={history.length} />
           </Col>
@@ -125,7 +125,7 @@ export default function RunHistory() {
           loading={loadingArtifacts}
           dataSource={artifacts}
           pagination={false}
-          className="mb-4"
+          className="mb-2.5"
           columns={[
             { title: "类型", dataIndex: "kind", width: 120, render: (kind: ArtifactKind) => artifactLabel(kind) },
             { title: "目录", dataIndex: "path", render: (value: string) => <code className="text-xs text-slate-600">{value}</code> },

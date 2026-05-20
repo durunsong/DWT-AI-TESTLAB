@@ -1,4 +1,4 @@
-export const ALLOWED_TEST_ENVS = ["local", "dev", "test", "sit"] as const;
+export const ALLOWED_TEST_ENVS = ["local", "dev", "sit", "prod"] as const;
 
 export type TestEnv = (typeof ALLOWED_TEST_ENVS)[number];
 

@@ -201,7 +201,7 @@ export default function CaseEditor() {
 
   if (loading) {
     return (
-      <div className="flex min-h-full flex-col gap-4">
+      <div className="flex min-h-full flex-col gap-2.5">
         {contextHolder}
         <PageHeader title="用例编辑" description={caseId} />
         <Card className="min-h-[420px]">
@@ -216,7 +216,7 @@ export default function CaseEditor() {
   }
 
   return (
-    <div className="flex min-h-full flex-col gap-4">
+    <div className="flex min-h-full flex-col gap-2.5">
       {contextHolder}
       <PageHeader
         title={activeCase?.caseName ?? caseId}
@@ -241,7 +241,7 @@ export default function CaseEditor() {
           </>
         }
       />
-      <Row gutter={[16, 16]}>
+      <Row gutter={[10, 10]}>
         <Col xs={24} xl={16}>
           <Card title="基础信息" size="small" className="mb-3 [&_.ant-card-body]:py-3">
             <Form<CaseMetaFormValues>
@@ -290,7 +290,7 @@ export default function CaseEditor() {
           </Card>
         </Col>
         <Col xs={24} xl={8}>
-          <Card title="AI YAML 助手" className="mb-4">
+          <Card title="AI YAML 助手" className="mb-2.5">
             <div className="flex flex-col gap-2.5">
               <Typography.Text type="secondary">选择生成方式，AI 会先给出可校验草稿，确认后再应用到编辑器。</Typography.Text>
               <Segmented<CaseYamlAssistMode> block value={aiMode} options={aiModeOptions} onChange={setAiMode} />
@@ -346,8 +346,8 @@ export default function CaseEditor() {
         }
         onClose={() => setAiOpen(false)}
       >
-        <div className="grid h-full min-h-0 grid-cols-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-          <div className="space-y-4">
+        <div className="grid h-full min-h-0 grid-cols-1 gap-2.5 xl:grid-cols-[280px_minmax(0,1fr)]">
+          <div className="space-y-2.5">
             <Card size="small" title="生成模式">
               <Space direction="vertical" size={12} className="w-full">
                 <Segmented<CaseYamlAssistMode> block value={aiMode} options={aiModeOptions} onChange={setAiMode} />

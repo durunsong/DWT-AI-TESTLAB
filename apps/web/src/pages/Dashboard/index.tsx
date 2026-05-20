@@ -48,7 +48,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
+    <div className="flex h-full min-h-0 flex-col gap-2.5">
       {contextHolder}
       <PageHeader
         title="运行工作台"
@@ -56,9 +56,9 @@ export default function Dashboard() {
         extra={<EnvSelector value={env} disabled={run?.status === "running"} onChange={setEnv} />}
       />
 
-      <Row gutter={[16, 16]} className="min-h-0 flex-1 overflow-y-auto xl:overflow-hidden">
+      <Row gutter={[10, 10]} className="min-h-0 flex-1 overflow-y-auto xl:overflow-hidden">
         <Col xs={24} xl={15} xxl={16} className="min-h-0 overflow-visible pr-0 xl:overflow-y-auto xl:overflow-x-hidden xl:pr-1">
-          <Space direction="vertical" size={16} className="w-full">
+          <Space direction="vertical" size={10} className="w-full">
             <Card title="流程入口">
               <RunButtonGroup
                 cases={cases}
@@ -74,7 +74,7 @@ export default function Dashboard() {
           </Space>
         </Col>
         <Col xs={24} xl={9} xxl={8} className="min-h-0 pr-0 xl:max-h-full xl:overflow-y-auto xl:overflow-x-hidden xl:pr-1">
-          <div className="flex min-h-0 flex-col gap-4 pb-1">
+          <div className="flex min-h-0 flex-col gap-2.5 pb-1">
             <Alert
               className="shrink-0"
               type={dbHealth?.enabled ? "success" : "warning"}

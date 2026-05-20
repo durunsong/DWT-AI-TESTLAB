@@ -40,7 +40,7 @@ export default function ReportViewer() {
 
   if (!runId) {
     return (
-      <div className="flex min-h-full flex-col gap-4">
+      <div className="flex min-h-full flex-col gap-2.5">
         <PageHeader title="报告查看" description="暂无运行记录，请先执行用例。" />
         <Empty description="没有可查看的报告" />
       </div>
@@ -64,7 +64,7 @@ export default function ReportViewer() {
   }
 
   return (
-    <div className="flex min-h-full flex-col gap-4">
+    <div className="flex min-h-full flex-col gap-2.5">
       {contextHolder}
       <PageHeader
         title="报告查看"
@@ -108,9 +108,9 @@ export default function ReportViewer() {
       <Card className="[&_.ant-card-body]:p-3">
         {mode === "overview" ? (
           summary ? (
-            <div className="space-y-4">
+            <div className="space-y-2.5">
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+                <div className="mb-2.5 flex flex-wrap items-start justify-between gap-2.5">
                   <div className="min-w-0">
                     <h2 className="m-0 truncate text-2xl font-semibold text-slate-950">{summary.caseName ?? summary.caseId}</h2>
                     <p className="mt-2 break-all text-sm text-slate-500">
@@ -134,19 +134,20 @@ export default function ReportViewer() {
                   </Col>
                 </Row>
               </div>
-              {failureSummary ? (
-                <Alert type="error" showIcon message="失败摘要" description={failureSummary} />
-              ) : null}
-              <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-                <Table<StepResult>
-                  rowKey="stepId"
-                  dataSource={steps}
-                  pagination={false}
-                  size="middle"
-                  tableLayout="fixed"
-                  scroll={{ x: 1320 }}
-                  className="report-step-table"
-                  columns={[
+              <div className="grid gap-[10px]">
+                {failureSummary ? (
+                  <Alert type="error" showIcon message="失败摘要" description={failureSummary} />
+                ) : null}
+                <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                  <Table<StepResult>
+                    rowKey="stepId"
+                    dataSource={steps}
+                    pagination={false}
+                    size="middle"
+                    tableLayout="fixed"
+                    scroll={{ x: 1320 }}
+                    className="report-step-table"
+                    columns={[
                     {
                       title: "#",
                       width: 54,
@@ -214,9 +215,10 @@ export default function ReportViewer() {
                           <span className="text-slate-400">-</span>
                         )
                     }
-                  ]}
-                  rowClassName={(record) => `report-step-table__row report-step-table__row--${record.status}`}
-                />
+                    ]}
+                    rowClassName={(record) => `report-step-table__row report-step-table__row--${record.status}`}
+                  />
+                </div>
               </div>
             </div>
           ) : (

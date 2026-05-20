@@ -86,6 +86,7 @@ export class CaseService {
     }
 
     const files = await this.listScenarioFiles();
+    await this.assertCaseNameAvailable(caseName, files);
     const targetPath = path.resolve(this.scenarioDir(), `${caseId}.yaml`);
     if (!targetPath.startsWith(this.scenarioDir() + path.sep)) {
       throw new Error("用例文件路径非法");
@@ -166,6 +167,7 @@ export class CaseService {
     if (files.some((filePath) => this.caseIdFromFilePath(filePath) === caseId)) {
       throw new Error(`用例文件已存在：${caseId}.yaml`);
     }
+    await this.assertCaseNameAvailable(validation.caseName, files);
     for (const filePath of files) {
       const existing = validateScenarioContent(await fs.readFile(filePath, "utf8"));
       if (existing.caseId === caseId) {
@@ -221,6 +223,9 @@ export class CaseService {
           ]
         }
       };
+    }
+    if (validation.caseName) {
+      await this.assertCaseNameAvailable(validation.caseName, await this.listScenarioFiles(), caseId);
     }
 
     const filePath = await this.findScenarioPath(caseId);
@@ -316,8 +321,30 @@ export class CaseService {
       .filter((filePath) => filePath.startsWith(scenarioDir + path.sep));
   }
 
+  private async assertCaseNameAvailable(caseName: string, files: string[], excludeCaseId?: string): Promise<void> {
+    const targetName = this.normalizeCaseName(caseName);
+    if (!targetName) {
+      return;
+    }
+    for (const filePath of files) {
+      const content = await fs.readFile(filePath, "utf8");
+      const validation = validateScenarioContent(content);
+      const existingCaseId = validation.caseId ?? this.caseIdFromFilePath(filePath);
+      if (excludeCaseId && existingCaseId === excludeCaseId) {
+        continue;
+      }
+      if (validation.caseName && this.normalizeCaseName(validation.caseName) === targetName) {
+        throw new Error(`用例名称已存在：${caseName}`);
+      }
+    }
+  }
+
   private caseIdFromFilePath(filePath: string): string {
     return path.basename(filePath).replace(/\.(ya?ml)$/i, "");
+  }
+
+  private normalizeCaseName(value: string): string {
+    return value.trim().replace(/\s+/g, " ").toLowerCase();
   }
 
   private normalizeContent(content: string): string {
@@ -336,6 +363,7 @@ export class CaseService {
       let steps = this.normalizeAiSteps(scenario.steps, sessions);
       let variables = this.normalizeAiVariables(scenario.variables, steps);
       steps = this.normalizeAiStepSafety(this.ensureLoginOpenSteps(steps), variables);
+      steps = this.normalizeAdminPerinfoStepsIfNeeded(scenario, steps, sessions);
       variables = this.normalizeAiVariables(variables, steps);
 
       scenario.sessions = sessions;
@@ -483,6 +511,88 @@ export class CaseService {
       });
   }
 
+  private normalizeAdminPerinfoStepsIfNeeded(
+    scenario: Record<string, unknown>,
+    steps: Array<Record<string, unknown>>,
+    sessions: Array<Record<string, unknown>>
+  ): Array<Record<string, unknown>> {
+    const hasAdmin = sessions.some((session) => session.name === "admin");
+    const contextText = [
+      this.stringValue(scenario.case_id),
+      this.stringValue(scenario.case_name),
+      this.stringValue(scenario.description),
+      YAML.stringify(steps)
+    ].join("\n");
+    if (!hasAdmin || !/(perinfo|个人信息|修改资料|用户名称|登录密码)/i.test(contextText)) {
+      return steps;
+    }
+
+    const normalized: Array<Record<string, unknown>> = [];
+    let insertedPerinfoOpen = steps.some((step) => this.stringValue(step.url).includes("/admin/sys/perinfo"));
+
+    for (const step of steps) {
+      const stepText = [
+        this.stringValue(step.step_id),
+        this.stringValue(step.name),
+        this.stringValue(step.target),
+        this.stringValue(step.url)
+      ].join(" ");
+
+      if (step.type === "web_click" && /(系统|个人信息)/.test(stepText)) {
+        continue;
+      }
+      if (step.type === "web_wait_element" && /(编辑个人信息|个人信息区域|perinfo)/i.test(stepText)) {
+        continue;
+      }
+
+      normalized.push(this.normalizeAdminPerinfoStep(step));
+
+      if (!insertedPerinfoOpen && step.type === "flow_login" && this.sessionName(step.session) === "admin") {
+        normalized.push({
+          step_id: this.uniqueStepId("admin_open_perinfo", [...normalized, ...steps]),
+          name: "admin 打开个人信息页",
+          type: "web_open",
+          session: "admin",
+          url: "${session.login_url}#/admin/sys/perinfo"
+        });
+        insertedPerinfoOpen = true;
+      }
+    }
+
+    return normalized;
+  }
+
+  private normalizeAdminPerinfoStep(step: Record<string, unknown>): Record<string, unknown> {
+    const normalized = { ...step };
+    const target = this.stringValue(normalized.target);
+    const name = this.stringValue(normalized.name);
+    const combined = `${name} ${target}`;
+
+    if (/用户名称/.test(combined)) {
+      normalized.target = "admin_profile_username";
+    } else if (/登录密码/.test(combined)) {
+      normalized.target = "admin_profile_password";
+    } else if (/保存/.test(combined) && normalized.type === "web_click") {
+      normalized.target = "admin_profile_save";
+      normalized.wait_for_api = {
+        method: "POST",
+        url: "/user/baseInfo/edit",
+        expected_status: 200,
+        business_code_path: this.defaultApiBusinessCodePath(),
+        success_codes: [this.defaultApiSuccessCode()],
+        success: {
+          body_path: this.defaultApiBusinessCodePath(),
+          equals: this.defaultApiSuccessCode()
+        }
+      };
+    } else if (/(保存成功|修改成功)/.test(combined)) {
+      normalized.target = "admin_profile_success_message";
+      normalized.expected = "修改成功";
+    }
+
+    return normalized;
+  }
+
   private ensureLoginOpenSteps(steps: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
     const normalized: Array<Record<string, unknown>> = [];
     const openedSessions = new Set<string>();
@@ -620,6 +730,20 @@ export class CaseService {
       return `auto_${"${timestamp}"}`;
     }
     return "${timestamp}";
+  }
+
+  private defaultApiBusinessCodePath(): string {
+    return (process.env.API_BUSINESS_CODE_PATHS ?? "code")
+      .split(/[,\n]/)
+      .map((item) => item.trim())
+      .filter(Boolean)[0] ?? "code";
+  }
+
+  private defaultApiSuccessCode(): string {
+    return (process.env.API_BUSINESS_SUCCESS_CODES ?? "0000")
+      .split(/[,\n]/)
+      .map((item) => item.trim())
+      .filter(Boolean)[0] ?? "0000";
   }
 
   private defaultStepId(session: "user" | "admin", type: unknown, index: number): string {

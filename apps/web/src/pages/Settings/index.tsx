@@ -184,12 +184,12 @@ export default function Settings() {
   ];
 
   return (
-    <div className="flex min-h-full flex-col gap-4">
+    <div className="flex min-h-full flex-col gap-2.5">
       {contextHolder}
       <PageHeader title="运行设置" description="维护不同测试环境的运行配置，并设置前端默认执行环境。" />
-      <div className="grid grid-cols-[360px_minmax(0,1fr)] gap-4">
+      <div className="grid grid-cols-[360px_minmax(0,1fr)] gap-2.5">
         <Card title="环境" className="h-full">
-          <Form layout="vertical" className="[&_.ant-form-item]:mb-4">
+          <Form layout="vertical" className="[&_.ant-form-item]:mb-2.5">
             <Form.Item label="默认环境">
               <EnvSelector value={env} onChange={setEnv} />
             </Form.Item>
@@ -257,7 +257,7 @@ export default function Settings() {
           <Alert
             showIcon
             type="info"
-            className="mb-4"
+            className="mb-2.5"
             message={`当前 ${config.fileName} 缺少 ${config.missingKeys.length} 个模板变量，已从基础配置或模板带入，保存后会写入当前环境文件。`}
           />
         ) : null}
@@ -289,7 +289,7 @@ function upsertVariableValue(variables: EnvVariable[], key: string, value: strin
 
 function PreferenceItem({ title, value, children }: { title: string; value: string; children: ReactNode }) {
   return (
-    <div className="flex min-h-[86px] items-center justify-between gap-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+    <div className="flex min-h-[86px] items-center justify-between gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
       <div className="min-w-0">
         <div className="text-sm font-medium text-slate-900">{title}</div>
         <div className="mt-1 truncate text-xs text-slate-500">{value}</div>
