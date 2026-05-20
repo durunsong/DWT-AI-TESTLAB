@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { RunReport } from "@ai-e2e/shared";
+import type { RunReport, TestRunSummary } from "@ai-e2e/shared";
 
 export type ArtifactKind = "logs" | "screenshots" | "reports" | "traces";
 
@@ -41,13 +41,20 @@ export class ReportService {
   constructor(private readonly rootDir: string) {}
 
   async readJsonReport(runId: string): Promise<unknown> {
-    const file = path.resolve(this.rootDir, "reports", `${runId}.json`);
+    const safeRunId = await this.resolveRunId(runId);
+    const file = path.resolve(this.rootDir, "reports", `${safeRunId}.json`);
     return JSON.parse(await fs.readFile(file, "utf8"));
   }
 
   async readLog(runId: string): Promise<string> {
-    const file = path.resolve(this.rootDir, "logs", `${runId}.log`);
+    const safeRunId = await this.resolveRunId(runId);
+    const file = path.resolve(this.rootDir, "logs", `${safeRunId}.log`);
     return fs.readFile(file, "utf8");
+  }
+
+  async readRunSummary(runId: string): Promise<TestRunSummary> {
+    const report = (await this.readJsonReport(runId)) as RunReport;
+    return this.toRunSummary(report);
   }
 
   async listHistory(): Promise<RunHistoryItem[]> {
@@ -128,6 +135,43 @@ export class ReportService {
         logs: `/api/test-runs/${report.runId}/logs`
       }
     };
+  }
+
+  private toRunSummary(report: RunReport): TestRunSummary {
+    return {
+      runId: report.runId,
+      caseId: report.caseId,
+      caseName: report.caseName,
+      env: report.env,
+      status: report.status,
+      total: report.total,
+      passed: report.passed,
+      failed: report.failed,
+      skipped: report.skipped,
+      startedAt: report.startedAt,
+      endedAt: report.endedAt,
+      durationMs: report.durationMs,
+      steps: report.steps,
+      reportLinks: {
+        json: `/api/test-runs/${report.runId}/report`,
+        html: `/reports/${report.runId}.html`,
+        logs: `/api/test-runs/${report.runId}/logs`,
+        screenshots: `/screenshots/${report.runId}`,
+        traces: `/traces/${report.runId}`
+      }
+    };
+  }
+
+  private async resolveRunId(runId: string): Promise<string> {
+    if (runId !== "latest") {
+      return this.safeRunId(runId);
+    }
+
+    const latest = (await this.listHistory())[0];
+    if (!latest) {
+      throw new Error("暂无历史运行记录");
+    }
+    return latest.runId;
   }
 
   private async artifactSummary(kind: ArtifactKind): Promise<ArtifactSummary> {

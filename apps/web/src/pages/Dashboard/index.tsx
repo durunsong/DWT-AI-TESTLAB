@@ -3,7 +3,8 @@ import { Alert, Card, Col, Row, Space, Tabs, message } from "antd";
 import { useNavigate } from "react-router-dom";
 import { getDbHealth, getDowaletContext } from "../../api/context";
 import { listCases } from "../../api/cases";
-import { createTestRun, getTestRun } from "../../api/testRuns";
+import { listRunHistory } from "../../api/reports";
+import { createTestRun, getTestRun, getTestRunLogs } from "../../api/testRuns";
 import { EnvSelector } from "../../components/EnvSelector";
 import { LogTerminal } from "../../components/LogTerminal";
 import { PageHeader } from "../../components/PageHeader";
@@ -21,7 +22,7 @@ export default function Dashboard() {
   const [messageApi, contextHolder] = message.useMessage();
   const { cases, setCases } = useCaseStore();
   const { env, setEnv } = useSettingStore();
-  const { run, logs, setSummary, reset } = useRunStore();
+  const { run, logs, setSummary, setLogs, reset } = useRunStore();
   const [loadingCase, setLoadingCase] = useState("");
   const [context, setContext] = useState<DowaletContextSummary>();
   const [dbHealth, setDbHealth] = useState<DbHealthResult>();
@@ -32,13 +33,57 @@ export default function Dashboard() {
     getDbHealth().then(setDbHealth).catch(() => undefined);
   }, [messageApi, setCases]);
 
+  useEffect(() => {
+    if (run) return;
+    let canceled = false;
+
+    listRunHistory()
+      .then((history) => {
+        if (canceled) return;
+        const latest = history[0];
+        if (!latest) {
+          return undefined;
+        }
+        return getTestRun(latest.runId);
+      })
+      .then((latestRun) => {
+        if (!canceled && latestRun) {
+          setSummary(latestRun);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      canceled = true;
+    };
+  }, [run, setSummary]);
+
+  useEffect(() => {
+    if (!run?.runId || logs.length) return;
+    let canceled = false;
+
+    getTestRunLogs(run.runId)
+      .then((nextLogs) => {
+        if (!canceled && nextLogs) {
+          setLogs(nextLogs);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      canceled = true;
+    };
+  }, [logs.length, run?.runId, setLogs]);
+
   async function handleRun(caseId: string) {
     reset();
     setLoadingCase(caseId);
     try {
       const created = await createTestRun({ caseId, env });
       const nextRun = await getTestRun(created.runId);
-      setSummary(nextRun);
+      if (nextRun) {
+        setSummary(nextRun);
+      }
       navigate(`/runs/${created.runId}`);
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : String(error));

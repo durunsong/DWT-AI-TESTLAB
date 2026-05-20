@@ -8,6 +8,10 @@
     "dev": "pnpm --parallel --filter @ai-e2e/server --filter @ai-e2e/web dev",
     "dev:stop": "node scripts/kill-dev-ports.mjs",
     "build": "pnpm -r build",
+    "build:local": "pnpm -r --if-present build:local",
+    "build:dev": "pnpm -r --if-present build:dev",
+    "build:sit": "pnpm -r --if-present build:sit",
+    "build:prod": "pnpm -r --if-present build:prod",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   },

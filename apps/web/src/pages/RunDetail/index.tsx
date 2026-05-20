@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, Col, Modal, Row, Space, Table, Tag, Tooltip, Typography, message } from "antd";
-import { RobotOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Col, Empty, Modal, Row, Space, Table, Tag, Tooltip, Typography, message } from "antd";
+import { CopyOutlined, RobotOutlined } from "@ant-design/icons";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { analyzeScreenshotStream } from "../../api/ai";
 import { AiThinking } from "../../components/AiThinking";
@@ -16,37 +16,61 @@ import type { StepResult, TestRunEvent } from "../../types/run";
 import { toScreenshotUrl } from "../../utils/artifact-url";
 import { formatDuration, formatTime } from "../../utils/format";
 
+interface DetailPreview {
+  title: string;
+  content: string;
+  danger?: boolean;
+}
+
 export default function RunDetail() {
   const params = useParams();
   const navigate = useNavigate();
   const [messageApi, contextHolder] = message.useMessage();
-  const { run, logs, runId: latestRunId, setSummary, updateStep, setLogs, setRun } = useRunStore();
-  const runId = params.runId === "latest" ? latestRunId : params.runId;
+  const { run, logs, setSummary, updateStep, setLogs, setRun, reset } = useRunStore();
+  const runId = params.runId === "latest" ? "latest" : params.runId;
   const [aiAnalysis, setAiAnalysis] = useState("");
   const [aiLoadingStep, setAiLoadingStep] = useState("");
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [aiStepId, setAiStepId] = useState("");
   const [screenshotPreview, setScreenshotPreview] = useState<{ title: string; src: string }>();
+  const [detailPreview, setDetailPreview] = useState<DetailPreview>();
   const [runLoadError, setRunLoadError] = useState("");
+  const [latestMissing, setLatestMissing] = useState(false);
 
   useEffect(() => {
     if (!runId) return;
     let canceled = false;
+    setLatestMissing(false);
 
     async function loadRun() {
       try {
         const nextRun = await getTestRun(runId!);
         if (canceled) return;
+        if (!nextRun) {
+          reset();
+          setLogs("");
+          setRunLoadError("");
+          setLatestMissing(params.runId === "latest");
+          return;
+        }
+        setLatestMissing(false);
         setSummary(nextRun);
         setRunLoadError("");
 
-        const nextLogs = await getTestRunLogs(runId!).catch(() => "");
+        const nextLogs = await getTestRunLogs(nextRun.runId).catch(() => "");
         if (!canceled && nextLogs) {
           setLogs(nextLogs);
         }
       } catch (error) {
         if (!canceled) {
-          setRunLoadError(error instanceof Error ? error.message : String(error));
+          const message = error instanceof Error ? error.message : String(error);
+          setRunLoadError(message);
+          if (params.runId === "latest" && isNoHistoryError(message)) {
+            reset();
+            setLogs("");
+            setLatestMissing(true);
+            setRunLoadError("");
+          }
         }
       }
     }
@@ -55,7 +79,7 @@ export default function RunDetail() {
     return () => {
       canceled = true;
     };
-  }, [runId, setLogs, setSummary]);
+  }, [params.runId, reset, runId, setLogs, setSummary]);
 
   useEffect(() => {
     if (!runId || run?.status !== "running") return;
@@ -67,7 +91,7 @@ export default function RunDetail() {
     source.addEventListener("run_finished", (event) => {
       const payload = JSON.parse((event as MessageEvent).data) as TestRunEvent;
       setRun({ status: payload.status === "failed" ? "failed" : "passed" });
-      getTestRun(runId).then(setSummary).catch(() => undefined);
+      getTestRun(runId).then((nextRun) => nextRun && setSummary(nextRun)).catch(() => undefined);
       getTestRunLogs(runId).then(setLogs).catch(() => undefined);
       source.close();
     });
@@ -110,10 +134,27 @@ export default function RunDetail() {
     messageApi.success(successMessage);
   }
 
-  if (!runId) {
+  function openDetail(title: string, content: string, danger = false) {
+    setDetailPreview({ title, content, danger });
+  }
+
+  if (!runId || (params.runId === "latest" && latestMissing)) {
     return (
       <div className="flex flex-col gap-2.5">
-        <PageHeader title="执行详情" description="暂无运行记录，请先从工作台启动一个用例。" />
+        {contextHolder}
+        <PageHeader
+          title="执行详情"
+          description="暂无运行记录，请先从运行工作台启动一个用例。"
+          extra={
+            <Space>
+              <Button onClick={() => navigate("/dashboard")}>返回工作台</Button>
+              <Link to="/cases">返回用例</Link>
+            </Space>
+          }
+        />
+        <Card>
+          <Empty description="暂无执行详情" />
+        </Card>
       </div>
     );
   }
@@ -202,21 +243,28 @@ export default function RunDetail() {
                   { title: "状态", dataIndex: "status", width: 100, render: (value) => <Tag color={statusColor(value)}>{statusText(value)}</Tag> },
                   { title: "开始时间", dataIndex: "startedAt", width: 120, render: formatTime },
                   { title: "耗时", dataIndex: "durationMs", width: 100, render: formatDuration },
-                  { title: "数据/接口", dataIndex: "data", width: 180, render: renderStepData },
+                  {
+                    title: "数据/接口",
+                    dataIndex: "data",
+                    width: 180,
+                    render: (value: unknown | undefined, record) =>
+                      renderDetailCell({
+                        content: formatDetailContent(value),
+                        empty: value === undefined,
+                        onOpen: () => openDetail(`数据/接口：${record.stepId}`, formatDetailContent(value))
+                      })
+                  },
                   {
                     title: "错误摘要",
                     dataIndex: "error",
                     width: 320,
-                    render: (value?: string) =>
-                      value ? (
-                        <Tooltip title={<pre className="m-0 max-w-[640px] whitespace-pre-wrap text-xs">{value}</pre>}>
-                          <Typography.Text type="danger" ellipsis className="!block">
-                            {value}
-                          </Typography.Text>
-                        </Tooltip>
-                      ) : (
-                        <span className="text-slate-400">-</span>
-                      )
+                    render: (value: string | undefined, record) =>
+                      renderDetailCell({
+                        content: value ?? "",
+                        empty: !value,
+                        danger: true,
+                        onOpen: () => openDetail(`错误详情：${record.stepId}`, value ?? "", true)
+                      })
                   },
                   {
                     title: "诊断",
@@ -316,22 +364,73 @@ export default function RunDetail() {
           </div>
         ) : null}
       </Modal>
+      <Modal
+        title={detailPreview?.title ?? "详情"}
+        open={Boolean(detailPreview)}
+        width={920}
+        destroyOnHidden
+        onCancel={() => setDetailPreview(undefined)}
+        footer={
+          <Space>
+            <Button onClick={() => setDetailPreview(undefined)}>关闭</Button>
+            <Button
+              type="primary"
+              icon={<CopyOutlined />}
+              disabled={!detailPreview?.content}
+              onClick={() => void copyText(detailPreview?.content ?? "", "详情已复制")}
+            >
+              复制
+            </Button>
+          </Space>
+        }
+      >
+        {detailPreview ? (
+          <pre
+            className={`m-0 max-h-[62vh] overflow-auto whitespace-pre-wrap break-words rounded-lg border p-3.5 font-mono text-xs leading-relaxed ${
+              detailPreview.danger
+                ? "border-red-200 bg-red-50 text-red-700"
+                : "border-slate-200 bg-slate-950 text-slate-100"
+            }`}
+          >
+            {detailPreview.content}
+          </pre>
+        ) : null}
+      </Modal>
     </div>
   );
 }
 
-function renderStepData(value?: unknown) {
-  if (value === undefined) {
+function renderDetailCell(props: { content: string; empty: boolean; danger?: boolean; onOpen: () => void }) {
+  if (props.empty) {
     return <span className="text-slate-400">-</span>;
   }
-  const text = JSON.stringify(value, null, 2);
+  const preview = compactPreview(props.content);
   return (
-    <Tooltip title={<pre className="m-0 max-w-[560px] whitespace-pre-wrap text-xs">{text}</pre>}>
-      <Typography.Text className="!block !font-mono !text-xs !text-slate-600" ellipsis>
-        {text}
+    <button
+      type="button"
+      className={`flex max-w-full cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-left text-xs ${
+        props.danger ? "text-red-500" : "text-slate-600"
+      }`}
+      onClick={props.onOpen}
+    >
+      <Typography.Text className={`!max-w-[260px] !font-mono !text-xs ${props.danger ? "!text-red-500" : "!text-slate-600"}`} ellipsis>
+        {preview}
       </Typography.Text>
-    </Tooltip>
+      <span className="shrink-0 text-blue-600">详情</span>
+    </button>
   );
+}
+
+function formatDetailContent(value?: unknown): string {
+  if (value === undefined) return "";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value, null, 2);
+}
+
+function compactPreview(content: string): string {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  if (normalized.length <= 72) return normalized;
+  return `${normalized.slice(0, 72)}...`;
 }
 
 function statusColor(status: string): string {
@@ -343,4 +442,8 @@ function statusColor(status: string): string {
 
 function statusText(status: string): string {
   return ({ pending: "待执行", running: "执行中", passed: "成功", failed: "失败", skipped: "跳过" } as Record<string, string>)[status] ?? status;
+}
+
+function isNoHistoryError(message: string): boolean {
+  return message.includes("暂无历史运行记录");
 }

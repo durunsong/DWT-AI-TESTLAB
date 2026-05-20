@@ -35,14 +35,31 @@ export async function registerTestRunRoutes(
   });
 
   app.get<{ Params: { runId: string } }>("/api/test-runs/:runId", async (request) => {
-    return ok(testRunService.get(request.params.runId));
+    if (request.params.runId === "latest") {
+      const latest = (await reportService.listHistory())[0];
+      return ok(latest ? await reportService.readRunSummary(latest.runId) : null);
+    }
+
+    try {
+      return ok(testRunService.get(request.params.runId));
+    } catch {
+      return ok(await reportService.readRunSummary(request.params.runId));
+    }
   });
 
   app.get<{ Params: { runId: string } }>("/api/test-runs/:runId/report", async (request) => {
+    if (request.params.runId === "latest") {
+      const latest = (await reportService.listHistory())[0];
+      return ok(latest ? await reportService.readJsonReport(latest.runId) : null);
+    }
     return ok(await reportService.readJsonReport(request.params.runId));
   });
 
   app.get<{ Params: { runId: string } }>("/api/test-runs/:runId/logs", async (request) => {
+    if (request.params.runId === "latest") {
+      const latest = (await reportService.listHistory())[0];
+      return ok(latest ? await reportService.readLog(latest.runId) : "");
+    }
     return ok(await reportService.readLog(request.params.runId));
   });
 

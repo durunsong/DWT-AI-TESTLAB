@@ -1,8 +1,9 @@
 defaults:
   step_timeout_ms: 60000
   wait_for_network: true
-case_id: admin_zilkiaoxiugai001
-case_name: admin 修改资料001
+case_id: "admin_zilkiaoxiugai001"
+case_name: "admin 修改资料001"
+description: "http://localhost:5173/admin/#/admin/sys/perinfo 页面编辑个人信息--个人资料"
 mode: web
 sessions:
   - name: admin

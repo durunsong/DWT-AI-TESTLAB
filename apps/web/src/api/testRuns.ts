@@ -5,8 +5,8 @@ export function createTestRun(data: CreateTestRunParams): Promise<CreateTestRunR
   return request.post<unknown, CreateTestRunResponse>("/test-runs", data);
 }
 
-export function getTestRun(runId: string): Promise<TestRunSummary> {
-  return request.get<unknown, TestRunSummary>(`/test-runs/${runId}`);
+export function getTestRun(runId: string): Promise<TestRunSummary | null> {
+  return request.get<unknown, TestRunSummary | null>(`/test-runs/${runId}`);
 }
 
 export function getTestRunLogs(runId: string): Promise<string> {

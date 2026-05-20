@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Button, Card, Col, Empty, Modal, Row, Segmented, Space, Statistic, Table, Tag, Tooltip, Typography, message } from "antd";
+import { Alert, Button, Card, Col, Empty, Modal, Row, Segmented, Space, Statistic, Table, Tag, Typography, message } from "antd";
 import { CopyOutlined, FileTextOutlined, FolderOpenOutlined } from "@ant-design/icons";
 import { useParams, useSearchParams } from "react-router-dom";
 import { getTestRun, getTestRunLogs } from "../../api/testRuns";
@@ -14,16 +14,24 @@ import { formatDuration, formatTime } from "../../utils/format";
 
 type ViewMode = "overview" | "html" | "json" | "screenshots" | "logs";
 
+interface DetailPreview {
+  title: string;
+  content: string;
+  danger?: boolean;
+}
+
 export default function ReportViewer() {
   const params = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [messageApi, contextHolder] = message.useMessage();
-  const { runId: latestRunId, run, setSummary } = useRunStore();
-  const runId = params.runId === "latest" ? latestRunId : params.runId;
+  const { runId: latestRunId, run, setSummary, reset } = useRunStore();
+  const runId = params.runId === "latest" ? latestRunId || "latest" : params.runId;
   const [report, setReport] = useState<RunReport>();
   const [mode, setMode] = useState<ViewMode>(() => readViewMode(searchParams.get("mode")));
   const [logs, setLogs] = useState("");
   const [screenshotPreview, setScreenshotPreview] = useState<{ title: string; src: string }>();
+  const [detailPreview, setDetailPreview] = useState<DetailPreview>();
+  const [latestMissing, setLatestMissing] = useState(false);
 
   useEffect(() => {
     setMode(readViewMode(searchParams.get("mode")));
@@ -31,14 +39,54 @@ export default function ReportViewer() {
 
   useEffect(() => {
     if (!runId) return;
-    getTestRun(runId).then(setSummary).catch(() => undefined);
-    getTestRunReport(runId)
-      .then(setReport)
-      .catch((error) => messageApi.warning(error instanceof Error ? error.message : String(error)));
-    getTestRunLogs(runId).then(setLogs).catch(() => undefined);
-  }, [messageApi, runId, setSummary]);
+    let canceled = false;
+    setLatestMissing(false);
 
-  if (!runId) {
+    async function loadReport() {
+      try {
+        const summary = await getTestRun(runId!);
+        if (canceled) return;
+        if (!summary) {
+          reset();
+          setReport(undefined);
+          setLogs("");
+          setLatestMissing(true);
+          return;
+        }
+
+        setSummary(summary);
+        const [nextReport, nextLogs] = await Promise.all([
+          getTestRunReport(summary.runId).catch((error) => {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            messageApi.warning(errorMessage);
+            return null;
+          }),
+          getTestRunLogs(summary.runId).catch(() => "")
+        ]);
+        if (canceled) return;
+        setReport(nextReport ?? undefined);
+        setLogs(nextLogs);
+      } catch (error) {
+        if (canceled) return;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (params.runId === "latest" && isNoHistoryError(errorMessage)) {
+          reset();
+          setReport(undefined);
+          setLogs("");
+          setLatestMissing(true);
+          return;
+        }
+        messageApi.warning(errorMessage);
+      }
+    }
+
+    void loadReport();
+    return () => {
+      canceled = true;
+    };
+  }, [messageApi, params.runId, reset, runId, setSummary]);
+
+  if (!runId || latestMissing) {
     return (
       <div className="flex min-h-full flex-col gap-2.5">
         <PageHeader title="报告查看" description="暂无运行记录，请先执行用例。" />
@@ -61,6 +109,10 @@ export default function ReportViewer() {
     if (!text) return;
     await navigator.clipboard.writeText(text);
     messageApi.success(successMessage);
+  }
+
+  function openDetail(title: string, content: string, danger = false) {
+    setDetailPreview({ title, content, danger });
   }
 
   return (
@@ -199,21 +251,23 @@ export default function ReportViewer() {
                       title: "数据",
                       dataIndex: "data",
                       width: 160,
-                      render: (value?: unknown) => renderStepData(value)
+                      render: (value: unknown | undefined, record) =>
+                        renderDetailCell({
+                          content: formatDetailContent(value),
+                          empty: value === undefined,
+                          onOpen: () => openDetail(`步骤数据：${record.stepId}`, formatDetailContent(value))
+                        })
                     },
                     {
                       title: "错误",
                       dataIndex: "error",
-                      render: (value?: string) =>
-                        value ? (
-                          <Tooltip title={value}>
-                            <Typography.Text type="danger" ellipsis className="!block">
-                              {value}
-                            </Typography.Text>
-                          </Tooltip>
-                        ) : (
-                          <span className="text-slate-400">-</span>
-                        )
+                      render: (value: string | undefined, record) =>
+                        renderDetailCell({
+                          content: value ?? "",
+                          empty: !value,
+                          danger: true,
+                          onOpen: () => openDetail(`错误详情：${record.stepId}`, value ?? "", true)
+                        })
                     }
                     ]}
                     rowClassName={(record) => `report-step-table__row report-step-table__row--${record.status}`}
@@ -292,6 +346,38 @@ export default function ReportViewer() {
           </div>
         ) : null}
       </Modal>
+      <Modal
+        title={detailPreview?.title ?? "详情"}
+        open={Boolean(detailPreview)}
+        width={920}
+        destroyOnHidden
+        onCancel={() => setDetailPreview(undefined)}
+        footer={
+          <Space>
+            <Button onClick={() => setDetailPreview(undefined)}>关闭</Button>
+            <Button
+              type="primary"
+              icon={<CopyOutlined />}
+              disabled={!detailPreview?.content}
+              onClick={() => void copyText(detailPreview?.content ?? "", "详情已复制")}
+            >
+              复制
+            </Button>
+          </Space>
+        }
+      >
+        {detailPreview ? (
+          <pre
+            className={`m-0 max-h-[62vh] overflow-auto whitespace-pre-wrap break-words rounded-lg border p-3.5 font-mono text-xs leading-relaxed ${
+              detailPreview.danger
+                ? "border-red-200 bg-red-50 text-red-700"
+                : "border-slate-200 bg-slate-950 text-slate-100"
+            }`}
+          >
+            {detailPreview.content}
+          </pre>
+        ) : null}
+      </Modal>
     </div>
   );
 }
@@ -316,18 +402,37 @@ function StepStatusBadge({ status }: { status: string }) {
   );
 }
 
-function renderStepData(value?: unknown) {
-  if (value === undefined) {
+function renderDetailCell(props: { content: string; empty: boolean; danger?: boolean; onOpen: () => void }) {
+  if (props.empty) {
     return <span className="text-slate-400">-</span>;
   }
-  const text = JSON.stringify(value, null, 2);
+  const preview = compactPreview(props.content);
   return (
-    <Tooltip title={<pre className="m-0 max-w-[560px] whitespace-pre-wrap text-xs">{text}</pre>}>
-      <Typography.Text className="!block !font-mono !text-xs !text-slate-600" ellipsis>
-        {text}
+    <button
+      type="button"
+      className={`flex max-w-full items-center gap-2 border-0 bg-transparent p-0 text-left text-xs cursor-pointer ${
+        props.danger ? "text-red-500" : "text-slate-600"
+      }`}
+      onClick={props.onOpen}
+    >
+      <Typography.Text className={`!max-w-[240px] !font-mono !text-xs ${props.danger ? "!text-red-500" : "!text-slate-600"}`} ellipsis>
+        {preview}
       </Typography.Text>
-    </Tooltip>
+      <span className="shrink-0 text-blue-600">详情</span>
+    </button>
   );
+}
+
+function formatDetailContent(value?: unknown): string {
+  if (value === undefined) return "";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value, null, 2);
+}
+
+function compactPreview(content: string): string {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  if (normalized.length <= 72) return normalized;
+  return `${normalized.slice(0, 72)}...`;
 }
 
 function statusBadgeClass(status: string): string {
@@ -356,4 +461,8 @@ function stepIndexClass(status: string): string {
 function readViewMode(mode: string | null): ViewMode {
   if (mode === "html" || mode === "json" || mode === "screenshots" || mode === "logs") return mode;
   return "overview";
+}
+
+function isNoHistoryError(message: string): boolean {
+  return message.includes("暂无历史运行记录");
 }
