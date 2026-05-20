@@ -1,4 +1,5 @@
 import { request } from "./request";
+import { apiUrl } from "./base-url";
 
 export interface AnalyzeScreenshotInput {
   screenshotPath: string;
@@ -55,7 +56,7 @@ export async function analyzeScreenshotStream(
     onError?: (error: Error) => void;
   }
 ): Promise<void> {
-  return readAiEventStream("/api/ai/analyze-screenshot/stream", input, handlers);
+  return readAiEventStream("/ai/analyze-screenshot/stream", input, handlers);
 }
 
 export async function assistCaseYamlStream(
@@ -66,7 +67,7 @@ export async function assistCaseYamlStream(
     onError?: (error: Error) => void;
   }
 ): Promise<void> {
-  return readAiEventStream("/api/ai/cases/assist/stream", input, handlers);
+  return readAiEventStream("/ai/cases/assist/stream", input, handlers);
 }
 
 async function readAiEventStream(
@@ -78,7 +79,7 @@ async function readAiEventStream(
     onError?: (error: Error) => void;
   }
 ): Promise<void> {
-  const response = await fetch(url, {
+  const response = await fetch(apiUrl(url), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input)

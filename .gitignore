@@ -10,3 +10,4 @@ screenshots/**/*
 traces/**/*
 test-results/
 playwright-report/
+apps/desktop/browsers.json

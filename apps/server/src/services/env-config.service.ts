@@ -97,6 +97,32 @@ export class EnvConfigService {
     return this.get(env);
   }
 
+  async importContent(env: TestEnv, content: string): Promise<EnvFileConfig> {
+    const current = await this.get(env);
+    const imported = this.parseEnvContent(content).variables;
+    if (!imported.length) {
+      throw new Error("上传的 env 文件中未解析到有效环境变量");
+    }
+
+    const merged = new Map<string, Pick<EnvVariable, "key" | "value" | "comment">>();
+    for (const variable of current.variables) {
+      merged.set(variable.key, {
+        key: variable.key,
+        value: variable.value,
+        comment: variable.comment
+      });
+    }
+    for (const variable of imported) {
+      merged.set(variable.key, {
+        key: variable.key,
+        value: variable.value,
+        comment: variable.comment
+      });
+    }
+
+    return this.save(env, [...merged.values()]);
+  }
+
   async applyToProcess(env: TestEnv): Promise<void> {
     const base = await this.readEnvFile(this.baseEnvPath);
     const current = await this.readEnvFile(this.filePath(env));
@@ -120,17 +146,23 @@ export class EnvConfigService {
       return { exists: false, variables: [], values: new Map() };
     }
 
+    const parsed = this.parseEnvContent(content);
+
+    return { exists: true, variables: parsed.variables, values: parsed.values };
+  }
+
+  private parseEnvContent(content: string): { variables: EnvVariable[]; values: Map<string, string> } {
     const parsed = dotenv.parse(content);
     const comments = collectComments(content);
-    const variables = Object.entries(parsed).map(([key, value]) => ({
-      key,
-      value,
-      comment: comments.get(key),
-      source: "file" as const,
-      sensitive: isSensitiveKey(key)
-    }));
+    const variables = this.normalizeVariables(
+      Object.entries(parsed).map(([key, value]) => ({
+        key,
+        value,
+        comment: comments.get(key)
+      }))
+    );
 
-    return { exists: true, variables, values: new Map(Object.entries(parsed)) };
+    return { variables, values: new Map(Object.entries(parsed)) };
   }
 
   private normalizeVariables(variables: Array<Pick<EnvVariable, "key" | "value" | "comment">>): EnvVariable[] {

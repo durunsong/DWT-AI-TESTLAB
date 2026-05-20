@@ -36,3 +36,24 @@ test("EnvConfigService saves env files and applies selected env to process.env",
   assert.equal(process.env.TEST_ENV, "sit");
   assert.equal(process.env.USER_LOGIN_URL, "http://sit.local");
 });
+
+test("EnvConfigService imports env content over the saved environment file", async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "env-config-"));
+  await fs.writeFile(path.join(rootDir, ".env.example"), "ADMIN_USERNAME=\nADMIN_PASSWORD=\nUSER_USERNAME=\nUSER_PASSWORD=\n", "utf8");
+  await fs.writeFile(path.join(rootDir, ".env.local"), "ADMIN_USERNAME=\nADMIN_PASSWORD=\nUSER_USERNAME=\nUSER_PASSWORD=\n", "utf8");
+
+  const service = new EnvConfigService(rootDir);
+  const config = await service.importContent(
+    "local",
+    [
+      "ADMIN_USERNAME=admin-user",
+      "ADMIN_PASSWORD=admin-password",
+      "USER_USERNAME=user",
+      "USER_PASSWORD=user-password"
+    ].join("\n")
+  );
+
+  assert.equal(config.variables.find((item) => item.key === "ADMIN_USERNAME")?.value, "admin-user");
+  assert.equal(config.variables.find((item) => item.key === "ADMIN_PASSWORD")?.value, "admin-password");
+  assert.match(await fs.readFile(path.join(rootDir, ".env.local"), "utf8"), /ADMIN_USERNAME=admin-user/);
+});

@@ -21,6 +21,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), tailwindcss()],
+    base: "./",
     envDir: isolatedEnvDir,
     define: buildViteEnvDefine(env),
     resolve: {

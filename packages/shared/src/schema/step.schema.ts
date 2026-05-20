@@ -3,7 +3,7 @@ import { SESSION_NAMES } from "../constants/session";
 import { STEP_TYPES } from "../constants/step-types";
 
 const dbParamSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
-const dbExpectedSchema = z.record(z.union([z.string(), z.number(), z.boolean(), z.null()]));
+const dbExpectedSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]));
 const apiExpectedValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 const waitForApiSchema = z.object({
   url: z.string().min(1),

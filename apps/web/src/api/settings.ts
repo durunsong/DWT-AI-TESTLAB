@@ -12,3 +12,7 @@ export function getEnvFile(env: TestEnv): Promise<EnvFileConfig> {
 export function saveEnvFile(env: TestEnv, variables: Array<Pick<EnvVariable, "key" | "value" | "comment">>): Promise<EnvFileConfig> {
   return request.put<unknown, EnvFileConfig>(`/settings/env-files/${env}`, { variables });
 }
+
+export function importEnvFile(env: TestEnv, content: string): Promise<EnvFileConfig> {
+  return request.post<unknown, EnvFileConfig>(`/settings/env-files/${env}/import`, { content });
+}

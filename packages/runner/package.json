@@ -16,9 +16,9 @@
   },
   "dependencies": {
     "@ai-e2e/shared": "workspace:*",
-    "dayjs": "^1.11.11",
-    "mysql2": "^3.11.0",
-    "playwright": "^1.44.0",
-    "yaml": "^2.4.2"
+    "dayjs": "^1.11.20",
+    "mysql2": "^3.22.3",
+    "playwright": "^1.60.0",
+    "yaml": "^2.9.0"
   }
 }

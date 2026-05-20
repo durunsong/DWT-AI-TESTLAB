@@ -20,7 +20,7 @@ export const scenarioCaseSchema = z.object({
     manual_review_on_failure: z.boolean().optional()
   }).optional(),
   sessions: z.array(scenarioSessionSchema).min(1),
-  variables: z.record(z.string()).optional(),
+  variables: z.record(z.string(), z.string()).optional(),
   locations: z.object({
     file: z.string().min(1)
   }),

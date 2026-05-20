@@ -1,0 +1,38 @@
+{
+  "name": "@ai-e2e/desktop",
+  "version": "1.0.2",
+  "description": "AI automated testing platform desktop client.",
+  "author": {
+    "name": "Dowsure",
+    "email": "dev@dowsure.com"
+  },
+  "homepage": "https://dowsure.com",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "pnpm --filter @ai-e2e/web build && node scripts/build.mjs",
+    "dist": "pnpm build && electron-builder --config electron-builder.yml",
+    "dist:win": "pnpm build && electron-builder --config electron-builder.yml --win",
+    "dist:win:exe": "pnpm build && electron-builder --config electron-builder.yml --win nsis",
+    "dist:win:msi": "pnpm build && electron-builder --config electron-builder.yml --win msi",
+    "dist:win:portable": "pnpm build && electron-builder --config electron-builder.yml --win portable",
+    "dist:linux": "pnpm build && electron-builder --config electron-builder.yml --linux",
+    "dist:linux:appimage": "pnpm build && electron-builder --config electron-builder.yml --linux AppImage",
+    "dist:linux:deb": "pnpm build && electron-builder --config electron-builder.yml --linux deb",
+    "dist:linux:rpm": "pnpm build && electron-builder --config electron-builder.yml --linux rpm",
+    "dist:linux:tar": "pnpm build && electron-builder --config electron-builder.yml --linux tar.gz",
+    "dist:mac": "pnpm build && electron-builder --config electron-builder.yml --mac",
+    "dist:mac:dmg": "pnpm build && electron-builder --config electron-builder.yml --mac dmg",
+    "dist:mac:pkg": "pnpm build && electron-builder --config electron-builder.yml --mac pkg",
+    "dist:mac:zip": "pnpm build && electron-builder --config electron-builder.yml --mac zip",
+    "pack": "pnpm build && electron-builder --config electron-builder.yml --dir",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "electron": "^42.2.0",
+    "electron-builder": "^26.8.1",
+    "esbuild": "^0.28.0"
+  }
+}

@@ -93,11 +93,11 @@ interface ApiResponse<T> {
 }
 
 export async function listCases(): Promise<CaseItem[]> {
-  return request<CaseItem[]>("/api/cases");
+  return request<CaseItem[]>("/cases");
 }
 
 export async function startTestRun(caseId: string, env: string): Promise<{ runId: string; status: RunStatus }> {
-  return request("/api/test-runs", {
+  return request("/test-runs", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ caseId, env })
@@ -105,23 +105,23 @@ export async function startTestRun(caseId: string, env: string): Promise<{ runId
 }
 
 export async function getTestRun(runId: string): Promise<TestRunSummary> {
-  return request<TestRunSummary>(`/api/test-runs/${runId}`);
+  return request<TestRunSummary>(`/test-runs/${runId}`);
 }
 
 export async function getRunLogs(runId: string): Promise<string> {
-  return request<string>(`/api/test-runs/${runId}/logs`);
+  return request<string>(`/test-runs/${runId}/logs`);
 }
 
 export async function getDowaletContext(): Promise<DowaletContextSummary> {
-  return request<DowaletContextSummary>("/api/dowalet/context");
+  return request<DowaletContextSummary>("/dowalet/context");
 }
 
 export async function getDbHealth(): Promise<DbHealthResult> {
-  return request<DbHealthResult>("/api/db/health");
+  return request<DbHealthResult>("/db/health");
 }
 
 export async function analyzeScreenshot(input: { screenshotPath: string; stepId?: string; error?: string }): Promise<string> {
-  return request<{ content: string }>("/api/ai/analyze-screenshot", {
+  return request<{ content: string }>("/ai/analyze-screenshot", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input)
@@ -129,10 +129,11 @@ export async function analyzeScreenshot(input: { screenshotPath: string; stepId?
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+  const response = await fetch(apiUrl(url), init);
   const payload = (await response.json()) as ApiResponse<T>;
   if (!response.ok || payload.code !== 0) {
     throw new Error(payload.message || "请求失败");
   }
   return payload.data;
 }
+import { apiUrl } from "./base-url";

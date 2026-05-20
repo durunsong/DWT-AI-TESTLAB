@@ -3,6 +3,7 @@ import { FileTextOutlined, FolderOpenOutlined } from "@ant-design/icons";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import type { TestRunSummary } from "../types/run";
+import { toArtifactUrl } from "../utils/artifact-url";
 
 interface ReportLinksProps {
   run?: TestRunSummary;
@@ -22,7 +23,7 @@ export function ReportLinks({ run }: ReportLinksProps) {
       <LinkButton label="HTML 报告" disabled={!links?.html} icon={<FileTextOutlined />} onClick={() => openReport("html")} />
       <LinkButton label="JSON 报告" disabled={!run?.runId} icon={<FileTextOutlined />} onClick={() => openReport("json")} />
       <LinkButton label="截图查看" disabled={!run?.runId} icon={<FolderOpenOutlined />} onClick={() => openReport("screenshots")} />
-      <LinkButton label="Trace 目录" disabled={!links?.traces} href={links?.traces} icon={<FolderOpenOutlined />} />
+      <LinkButton label="Trace 目录" disabled={!links?.traces} href={toArtifactUrl(links?.traces)} icon={<FolderOpenOutlined />} />
       <LinkButton label="运行日志" disabled={!run?.runId} icon={<FileTextOutlined />} onClick={() => openReport("logs")} />
     </Space>
   );

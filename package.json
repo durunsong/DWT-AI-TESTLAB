@@ -1,6 +1,6 @@
 {
   "name": "ai-e2e-test-platform",
-  "version": "0.1.0",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,12 +12,39 @@
     "build:dev": "pnpm -r --if-present build:dev",
     "build:sit": "pnpm -r --if-present build:sit",
     "build:prod": "pnpm -r --if-present build:prod",
+    "web:build": "pnpm --filter @ai-e2e/web build",
+    "web:build:local": "pnpm --filter @ai-e2e/web build:local",
+    "web:build:dev": "pnpm --filter @ai-e2e/web build:dev",
+    "web:build:sit": "pnpm --filter @ai-e2e/web build:sit",
+    "web:build:prod": "pnpm --filter @ai-e2e/web build:prod",
+    "desktop:dev": "pnpm --filter @ai-e2e/desktop dev",
+    "desktop:build": "pnpm --filter @ai-e2e/desktop build",
+    "desktop:pack": "pnpm --filter @ai-e2e/desktop run pack",
+    "desktop:dist": "pnpm --filter @ai-e2e/desktop run dist",
+    "desktop:dist:win": "pnpm --filter @ai-e2e/desktop run dist:win",
+    "desktop:dist:win:exe": "pnpm --filter @ai-e2e/desktop run dist:win:exe",
+    "desktop:dist:win:msi": "pnpm --filter @ai-e2e/desktop run dist:win:msi",
+    "desktop:dist:win:portable": "pnpm --filter @ai-e2e/desktop run dist:win:portable",
+    "desktop:dist:linux": "pnpm --filter @ai-e2e/desktop run dist:linux",
+    "desktop:dist:linux:appimage": "pnpm --filter @ai-e2e/desktop run dist:linux:appimage",
+    "desktop:dist:linux:deb": "pnpm --filter @ai-e2e/desktop run dist:linux:deb",
+    "desktop:dist:linux:rpm": "pnpm --filter @ai-e2e/desktop run dist:linux:rpm",
+    "desktop:dist:linux:tar": "pnpm --filter @ai-e2e/desktop run dist:linux:tar",
+    "desktop:dist:mac": "pnpm --filter @ai-e2e/desktop run dist:mac",
+    "desktop:dist:mac:dmg": "pnpm --filter @ai-e2e/desktop run dist:mac:dmg",
+    "desktop:dist:mac:pkg": "pnpm --filter @ai-e2e/desktop run dist:mac:pkg",
+    "desktop:dist:mac:zip": "pnpm --filter @ai-e2e/desktop run dist:mac:zip",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
-    "@types/node": "^20.12.12",
-    "tsx": "^4.11.0",
-    "typescript": "^5.4.5"
+    "@types/node": "^25.9.1",
+    "tsx": "^4.22.3",
+    "typescript": "^6.0.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "dompurify": "^3.4.5"
+    }
   }
 }
