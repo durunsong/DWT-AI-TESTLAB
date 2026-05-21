@@ -18,4 +18,11 @@ export async function registerSettingsRoutes(app: FastifyInstance, envConfigServ
       return ok(await envConfigService.save(normalizeTestEnv(request.params.env), request.body.variables ?? []));
     }
   );
+
+  app.post<{
+    Params: { env: string };
+    Body: { content?: string };
+  }>("/api/settings/env-files/:env/import", async (request) => {
+    return ok(await envConfigService.importContent(normalizeTestEnv(request.params.env), request.body.content ?? ""));
+  });
 }

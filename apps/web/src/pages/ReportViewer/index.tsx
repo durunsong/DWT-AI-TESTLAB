@@ -9,7 +9,7 @@ import { LogTerminal } from "../../components/LogTerminal";
 import { useRunStore } from "../../stores/useRunStore";
 import type { RunReport } from "../../types/report";
 import type { StepResult } from "../../types/run";
-import { toScreenshotUrl } from "../../utils/artifact-url";
+import { toArtifactUrl, toScreenshotUrl } from "../../utils/artifact-url";
 import { formatDuration, formatTime } from "../../utils/format";
 
 type ViewMode = "overview" | "html" | "json" | "screenshots" | "logs";
@@ -281,7 +281,7 @@ export default function ReportViewer() {
         ) : null}
         {mode === "html" ? (
           run?.reportLinks.html ? (
-            <iframe title="HTML 报告" src={run.reportLinks.html} className="h-[calc(100vh-300px)] min-h-[420px] w-full rounded-lg border border-[#d8e0ec] bg-white 2xl:min-h-[520px]" />
+            <iframe title="HTML 报告" src={toArtifactUrl(run.reportLinks.html)} className="h-[calc(100vh-300px)] min-h-[420px] w-full rounded-lg border border-[#d8e0ec] bg-white 2xl:min-h-[520px]" />
           ) : (
             <Empty description="HTML 报告尚未生成" />
           )

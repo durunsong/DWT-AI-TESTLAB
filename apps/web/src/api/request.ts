@@ -1,4 +1,5 @@
 import axios from "axios";
+import { getApiBaseUrl } from "./base-url";
 
 interface ApiResponse<T> {
   code: number;
@@ -7,7 +8,7 @@ interface ApiResponse<T> {
 }
 
 export const request = axios.create({
-  baseURL: "/api",
+  baseURL: getApiBaseUrl(),
   timeout: 60000
 });
 

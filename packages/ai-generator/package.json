@@ -16,6 +16,6 @@
   },
   "dependencies": {
     "@ai-e2e/shared": "workspace:*",
-    "yaml": "^2.4.2"
+    "yaml": "^2.9.0"
   }
 }

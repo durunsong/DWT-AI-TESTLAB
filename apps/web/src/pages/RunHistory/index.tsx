@@ -4,6 +4,7 @@ import { ClearOutlined, DeleteOutlined, FileTextOutlined, ReloadOutlined } from 
 import { Link } from "react-router-dom";
 import { clearArtifacts, deleteRunHistory, getArtifactSummaries, listRunHistory } from "../../api/reports";
 import { PageHeader } from "../../components/PageHeader";
+import { toArtifactUrl } from "../../utils/artifact-url";
 import type { ArtifactKind, ArtifactSummary, RunHistoryItem } from "../../types/report";
 import { formatDuration, formatTime } from "../../utils/format";
 
@@ -201,7 +202,7 @@ export default function RunHistory() {
                   <Link to={`/reports/${record.runId}`}>
                     <Button size="small" icon={<FileTextOutlined />}>报告</Button>
                   </Link>
-                  <Button size="small" onClick={() => window.open(record.reportLinks.html, "_blank", "noopener,noreferrer")}>
+                  <Button size="small" onClick={() => window.open(toArtifactUrl(record.reportLinks.html), "_blank", "noopener,noreferrer")}>
                     HTML
                   </Button>
                   <Popconfirm

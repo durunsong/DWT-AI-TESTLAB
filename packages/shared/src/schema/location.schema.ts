@@ -22,4 +22,4 @@ export const locationDefinitionSchema = z.object({
   fallback: z.array(locatorFallbackSchema).optional()
 });
 
-export const locationMapSchema = z.record(locationDefinitionSchema);
+export const locationMapSchema = z.record(z.string(), locationDefinitionSchema);

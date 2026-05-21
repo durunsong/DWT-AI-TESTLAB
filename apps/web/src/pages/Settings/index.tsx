@@ -1,9 +1,10 @@
-import { DeleteOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Form, Input, InputNumber, Popconfirm, Space, Switch, Table, Tag, message } from "antd";
+import { ClearOutlined, DeleteOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Form, Input, InputNumber, Popconfirm, Space, Switch, Table, Tag, Upload, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import type { RcFile } from "antd/es/upload";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { getEnvFile, saveEnvFile } from "../../api/settings";
+import { getEnvFile, importEnvFile, saveEnvFile } from "../../api/settings";
 import { EnvSelector } from "../../components/EnvSelector";
 import { PageHeader } from "../../components/PageHeader";
 import { useSettingStore } from "../../stores/useSettingStore";
@@ -26,6 +27,7 @@ export default function Settings() {
   const [variables, setVariables] = useState<EnvVariable[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [messageApi, contextHolder] = message.useMessage();
 
   const sourceText = useMemo(
@@ -93,6 +95,7 @@ export default function Settings() {
       const saved = await saveEnvFile(env, nextVariables);
       setConfig(saved);
       setVariables(saved.variables);
+      syncRunPreferences(saved.variables);
       if (successMessage) {
         messageApi.success(successMessage);
       }
@@ -137,6 +140,37 @@ export default function Settings() {
 
   const handleSave = async () => {
     await persistVariables(variables, `已保存 ${config?.fileName ?? "环境文件"}`);
+  };
+
+  const handleImportEnvFile = async (file: RcFile) => {
+    const maxSize = 1024 * 1024;
+    if (file.size > maxSize) {
+      messageApi.error("env 文件不能超过 1MB");
+      return Upload.LIST_IGNORE;
+    }
+
+    setImporting(true);
+    try {
+      const content = await file.text();
+      const saved = await importEnvFile(env, content);
+      const beforeKeys = new Set(variables.map((item) => item.key).filter(Boolean));
+      const importedKeys = extractEnvKeys(content);
+      const overwrittenCount = importedKeys.filter((key) => beforeKeys.has(key)).length;
+      setConfig(saved);
+      setVariables(saved.variables);
+      syncRunPreferences(saved.variables);
+      messageApi.success(`已导入 ${importedKeys.length} 个变量，覆盖 ${overwrittenCount} 个重复项`);
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "导入 env 文件失败");
+    } finally {
+      setImporting(false);
+    }
+
+    return Upload.LIST_IGNORE;
+  };
+
+  const handleClearVariables = async () => {
+    await persistVariables([], `已清空 ${config?.fileName ?? "环境文件"} 中保存的变量`);
   };
 
   const columns: ColumnsType<EnvVariable> = [
@@ -241,6 +275,23 @@ export default function Settings() {
         title="环境变量"
         extra={
           <Space>
+            <Upload accept=".env,.local,.txt" showUploadList={false} beforeUpload={handleImportEnvFile}>
+              <Button icon={<ImportOutlined />} loading={importing}>
+                导入 env
+              </Button>
+            </Upload>
+            <Popconfirm
+              title="清空当前环境变量？"
+              description={`会清空 ${config?.fileName ?? "当前环境文件"} 中已保存的变量，基础配置和模板变量仍会作为缺失项提示显示。`}
+              okText="清空"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              onConfirm={handleClearVariables}
+            >
+              <Button danger icon={<ClearOutlined />} disabled={saving || loading || importing}>
+                清空
+              </Button>
+            </Popconfirm>
             <Button icon={<PlusOutlined />} onClick={addVariable}>
               新增变量
             </Button>
@@ -285,6 +336,17 @@ function upsertVariableValue(variables: EnvVariable[], key: string, value: strin
     return [...variables, { key, value, source: "file", sensitive: isSensitiveKey(key) }];
   }
   return variables.map((item, itemIndex) => (itemIndex === index ? { ...item, value, source: "file" } : item));
+}
+
+function extractEnvKeys(content: string): string[] {
+  const keys = new Set<string>();
+  for (const line of content.split(/\r?\n/)) {
+    const match = line.trim().match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+    if (match?.[1]) {
+      keys.add(match[1]);
+    }
+  }
+  return [...keys];
 }
 
 function PreferenceItem({ title, value, children }: { title: string; value: string; children: ReactNode }) {

@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { Navigate, createBrowserRouter } from "react-router-dom";
+import { Navigate, createBrowserRouter, createHashRouter } from "react-router-dom";
 import { Spin } from "antd";
 import { App } from "../App";
 
@@ -11,7 +11,7 @@ const ReportViewer = lazy(() => import("../pages/ReportViewer"));
 const RunHistory = lazy(() => import("../pages/RunHistory"));
 const Settings = lazy(() => import("../pages/Settings"));
 
-export const router = createBrowserRouter([
+const routes = [
   {
     path: "/",
     element: <App />,
@@ -26,7 +26,9 @@ export const router = createBrowserRouter([
       { path: "settings", element: route(<Settings />) }
     ]
   }
-]);
+];
+
+export const router = isFileProtocol() ? createHashRouter(routes) : createBrowserRouter(routes);
 
 function route(element: ReactNode) {
   return <Suspense fallback={<PageLoading />}>{element}</Suspense>;
@@ -40,4 +42,8 @@ function PageLoading() {
       </Spin>
     </div>
   );
+}
+
+function isFileProtocol(): boolean {
+  return typeof window !== "undefined" && window.location.protocol === "file:";
 }

@@ -1,4 +1,5 @@
 import { request } from "./request";
+import { apiUrl } from "./base-url";
 import type { CreateTestRunParams, CreateTestRunResponse, TestRunSummary } from "../types/run";
 
 export function createTestRun(data: CreateTestRunParams): Promise<CreateTestRunResponse> {
@@ -14,5 +15,5 @@ export function getTestRunLogs(runId: string): Promise<string> {
 }
 
 export function eventSourceUrl(runId: string): string {
-  return `/api/test-runs/${runId}/events`;
+  return apiUrl(`/test-runs/${runId}/events`);
 }

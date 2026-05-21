@@ -1,0 +1,55 @@
+appId: com.dowsure.ai-e2e-testing
+productName: DWT Testing
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+asar: true
+npmRebuild: false
+directories:
+  output: ../../dist/desktop
+files:
+  - dist/**/*
+  - package.json
+  - browsers.json
+extraResources:
+  - from: ../../apps/web/dist
+    to: web
+  - from: ../../cases
+    to: seed/cases
+  - from: ../../.env.example
+    to: seed/.env.example
+win:
+  icon: assets/icon.ico
+  signAndEditExecutable: false
+  target:
+    - nsis
+    - msi
+    - portable
+    - dir
+mac:
+  identity: null
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - pkg
+    - zip
+linux:
+  icon: assets/icon.png
+  category: Development
+  maintainer: Dowsure <dev@dowsure.com>
+  target:
+    - AppImage
+    - deb
+    - rpm
+    - tar.gz
+nsis:
+  artifactName: ${productName}-${version}-win-${arch}-setup.${ext}
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+msi:
+  artifactName: ${productName}-${version}-win-${arch}-installer.${ext}
+portable:
+  artifactName: ${productName}-${version}-win-${arch}-portable.${ext}
+dmg:
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+pkg:
+  artifactName: ${productName}-${version}-mac-${arch}-installer.${ext}
