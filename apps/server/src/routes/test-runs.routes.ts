@@ -64,13 +64,17 @@ export async function registerTestRunRoutes(
   });
 
   app.get<{ Params: { runId: string; file: string } }>("/reports/:file", async (request, reply) => {
-    const filePath = testRunService.assetPath("reports", path.basename(request.params.file));
+    if (request.params.file === "favicon.png" || request.params.file === "favicon.ico") {
+      return reply.status(204).send();
+    }
+
+    const filePath = testRunService.artifactPath("reports", path.basename(request.params.file));
     reply.type(request.params.file.endsWith(".html") ? "text/html; charset=utf-8" : "application/json; charset=utf-8");
     return fs.readFile(filePath, "utf8");
   });
 
   app.get<{ Params: { runId: string; file: string } }>("/screenshots/:runId/:file", async (request, reply) => {
-    const filePath = testRunService.assetPath("screenshots", path.basename(request.params.runId), path.basename(request.params.file));
+    const filePath = testRunService.artifactPath("screenshots", path.basename(request.params.runId), path.basename(request.params.file));
     reply.type("image/png");
     return fs.readFile(filePath);
   });

@@ -30,7 +30,7 @@ export function buildMaterialCaseGenerationPrompt(input: MaterialCaseGenerationP
 
   return [
     `你是 ${appProductName()} 的自动化测试 DSL 生成器。`,
-    "请根据用户提供的 PRD、开源文档链接内容、docx/PDF 文档摘录和补充需求，生成一份 scenario YAML。",
+    "请根据用户提供的 PRD、公开文档链接内容、docx/PDF 文档摘录和补充需求，生成一份 scenario YAML。",
     "只输出最终 YAML 正文，不要输出 Markdown 代码围栏、解释、注释或 diff。",
     "YAML 必须能被平台 DSL 校验：包含 case_id、case_name、mode、sessions、locations.file、steps。",
     "建议在顶层输出 defaults: { step_timeout_ms: 60000, wait_for_network: true }，除非用户明确要求更短超时。",
@@ -41,7 +41,7 @@ export function buildMaterialCaseGenerationPrompt(input: MaterialCaseGenerationP
     "flow_login 步骤必须显式包含 username: \"${session.username}\" 和 password: \"${session.password}\"。",
     "每个 session 的第一个 flow_login 前必须先有 web_open 步骤打开 ${session.login_url}，不要直接以 flow_login 作为第一步。",
     "涉及页面跳转、菜单点击、保存提交、列表加载等接口异步渲染场景时，在对应步骤设置 wait_for_network: true；如果知道关键接口路径，必须在触发点击步骤上增加 wait_for_api，等待并校验后端返回，而不是只等待 toast 文案。",
-    "wait_for_api 示例：wait_for_api: { method: POST, url: /user/baseInfo/edit, expected_status: 200, business_code_path: code, success_codes: [\"0000\"] }。url 可写接口路径片段；业务成功码可由 API_BUSINESS_SUCCESS_CODES 配置，Dowsure 默认 code=0000 成功。",
+    "wait_for_api 示例：wait_for_api: { method: POST, url: /user/baseInfo/edit, expected_status: 200, business_code_path: code, success_codes: [\"0000\"] }。url 可写接口路径片段；业务成功码可由 API_BUSINESS_SUCCESS_CODES 配置。",
     "保存/提交/审核后不能只断言页面标题、菜单或当前页面仍可见；必须断言成功提示、接口业务成功、列表状态变化或数据库只读核验之一。",
     "涉及“提交/保存/审核后核对数据是否真的落库”的需求时，优先在 UI 操作后追加 db_assert；只允许 select/show/desc/describe/explain 只读 SQL，不要生成 db_clean 或任何 insert/update/delete/drop/truncate。",
     "db_query/db_assert 字段规范：sql 写参数化只读 SQL，params 写数组参数，expected 可写字符串或字段对象，save_as 可把 db_query 的单列值或整行 JSON 写入 ${var.xxx}，row_index 从 0 开始。",

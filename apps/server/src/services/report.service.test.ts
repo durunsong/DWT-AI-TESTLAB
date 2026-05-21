@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { RunReport } from "@ai-e2e/shared";
+import type { PlatformConfig } from "@ai-e2e/runner";
 import { ReportService } from "./report.service";
 
 test("deletes artifacts for one run history item", async () => {
@@ -81,6 +82,65 @@ test("reads latest run summary and log from report history", async () => {
   assert.equal(log, "latest log");
 });
 
-async function writeReport(rootDir: string, report: RunReport): Promise<void> {
-  await fs.writeFile(path.join(rootDir, "reports", `${report.runId}.json`), JSON.stringify(report), "utf8");
+test("uses configured artifact directories", async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "dwt-report-custom-"));
+  const artifactDirs = {
+    logsDir: "runtime/logs",
+    reportsDir: "runtime/reports",
+    screenshotsDir: "runtime/screenshots",
+    tracesDir: "runtime/traces"
+  };
+  await fs.mkdir(path.join(rootDir, artifactDirs.reportsDir), { recursive: true });
+  await fs.mkdir(path.join(rootDir, artifactDirs.logsDir), { recursive: true });
+
+  await writeReport(rootDir, {
+    runId: "001_custom_case",
+    caseId: "custom_case",
+    caseName: "自定义目录用例",
+    env: "test",
+    status: "passed",
+    startedAt: "2026-05-19T08:00:00.000Z",
+    endedAt: "2026-05-19T08:01:00.000Z",
+    durationMs: 60000,
+    total: 1,
+    passed: 1,
+    failed: 0,
+    skipped: 0,
+    steps: [],
+    artifacts: {}
+  }, artifactDirs.reportsDir);
+  await fs.writeFile(path.join(rootDir, artifactDirs.logsDir, "001_custom_case.log"), "custom log", "utf8");
+
+  const service = new ReportService(rootDir, {
+    ...defaultPlatformConfigForTest(),
+    artifacts: artifactDirs
+  });
+
+  assert.equal((await service.readRunSummary("latest")).runId, "001_custom_case");
+  assert.equal(await service.readLog("latest"), "custom log");
+});
+
+async function writeReport(rootDir: string, report: RunReport, reportsDir = "reports"): Promise<void> {
+  await fs.writeFile(path.join(rootDir, reportsDir, `${report.runId}.json`), JSON.stringify(report), "utf8");
+}
+
+function defaultPlatformConfigForTest(): PlatformConfig {
+  return {
+    app: { brandName: "Test", productName: "Test" },
+    server: { host: "127.0.0.1", port: 0, corsOrigins: ["*"] },
+    web: { host: "127.0.0.1", port: 0, devApiProxyTarget: "http://127.0.0.1:0", requestTimeoutMs: 60000, storageKey: "test-settings" },
+    desktop: {
+      appId: "test",
+      productName: "Test",
+      maintainer: "Test",
+      artifactName: "test.${ext}",
+      apiPort: 0,
+      window: { title: "Test", width: 1440, height: 920, minWidth: 1280, minHeight: 760 }
+    },
+    workspace: { directories: ["cases"] },
+    artifacts: { logsDir: "logs", reportsDir: "reports", screenshotsDir: "screenshots", tracesDir: "traces" },
+    browser: { defaultViewport: { width: 1920, height: 1080 } },
+    context: { defaultSources: ["user", "admin"], routeGroups: { enterpriseKeywords: [], approvalKeywords: [] } },
+    uploads: { contextBodyLimitMb: 5, materialFileMaxMb: 8, materialSourceMaxChars: 18000, materialLinkMaxChars: 24000 }
+  };
 }

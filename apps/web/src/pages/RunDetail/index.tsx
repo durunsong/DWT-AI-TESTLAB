@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Card, Col, Empty, Modal, Row, Space, Table, Tag, Tooltip, Typography, message } from "antd";
 import { CopyOutlined, RobotOutlined } from "@ant-design/icons";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -36,6 +36,7 @@ export default function RunDetail() {
   const [detailPreview, setDetailPreview] = useState<DetailPreview>();
   const [runLoadError, setRunLoadError] = useState("");
   const [latestMissing, setLatestMissing] = useState(false);
+  const aiStreamFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!runId) return;
@@ -107,23 +108,42 @@ export default function RunDetail() {
     setAiModalOpen(true);
     setAiLoadingStep(step.stepId);
     setAiAnalysis("");
+    let bufferedAnalysis = "";
     let streamError: Error | undefined;
+    const flushAnalysis = () => {
+      aiStreamFrameRef.current = null;
+      setAiAnalysis(bufferedAnalysis);
+    };
     try {
       await analyzeScreenshotStream(
         { screenshotPath: step.screenshot, stepId: step.stepId, error: step.error },
         {
-          onChunk: (chunk) => setAiAnalysis((current) => `${current}${chunk}`),
+          onChunk: (chunk) => {
+            bufferedAnalysis += chunk;
+            if (!aiStreamFrameRef.current) {
+              aiStreamFrameRef.current = window.requestAnimationFrame(flushAnalysis);
+            }
+          },
           onError: (error) => {
             streamError = error;
           }
         }
       );
+      if (aiStreamFrameRef.current) {
+        window.cancelAnimationFrame(aiStreamFrameRef.current);
+        aiStreamFrameRef.current = null;
+      }
+      setAiAnalysis(bufferedAnalysis);
       if (streamError) {
         throw streamError;
       }
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : String(error));
     } finally {
+      if (aiStreamFrameRef.current) {
+        window.cancelAnimationFrame(aiStreamFrameRef.current);
+        aiStreamFrameRef.current = null;
+      }
       setAiLoadingStep("");
     }
   }
@@ -176,7 +196,7 @@ export default function RunDetail() {
         <Alert
           type="warning"
           showIcon
-          message="服务端运行记录暂不可用"
+          title="服务端运行记录暂不可用"
           description="当前页面会保留已有前端缓存数据。通常是服务端重启后内存运行记录丢失，重新执行用例即可生成新的详情、日志和报告。"
           action={
             <Space>
@@ -192,7 +212,7 @@ export default function RunDetail() {
       ) : null}
       <Row gutter={[10, 10]} className="min-h-0 flex-none overflow-visible pb-2.5">
         <Col xs={24} xl={15} xxl={16} className="min-h-0 overflow-visible pr-0 xl:pr-1">
-          <Space direction="vertical" size={10} className="w-full pb-1">
+          <Space orientation="vertical" size={10} className="w-full pb-1">
             <RunStatusCard run={run} />
             {failureAnalysisStep ? (
               <Card
@@ -222,7 +242,7 @@ export default function RunDetail() {
                     onCopyCode={(code) => void copyText(code, "代码块已复制")}
                   />
                 ) : (
-                  <Alert type="warning" showIcon message="AI 分析失败" description={failureAnalysisStep.aiAnalysis?.error ?? "未返回分析结果"} />
+                  <Alert type="warning" showIcon title="AI 分析失败" description={failureAnalysisStep.aiAnalysis?.error ?? "未返回分析结果"} />
                 )}
               </Card>
             ) : null}

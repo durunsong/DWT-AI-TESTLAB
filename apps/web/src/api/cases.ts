@@ -1,5 +1,5 @@
 import { request } from "./request";
-import type { CaseDetail, CaseItem, CaseValidationResult, CreateCaseInput, DeleteCaseResult, ImportYamlResult, SaveCaseResult } from "../types/case";
+import type { CaseDetail, CaseItem, CasePreflightResult, CaseValidationResult, CreateCaseInput, DeleteCaseResult, ImportYamlResult, SaveCaseResult } from "../types/case";
 
 export function listCases(): Promise<CaseItem[]> {
   return request.get<unknown, CaseItem[]>("/cases");
@@ -27,4 +27,13 @@ export function deleteCase(caseId: string): Promise<DeleteCaseResult> {
 
 export function validateCase(content: string): Promise<CaseValidationResult> {
   return request.post<unknown, CaseValidationResult>("/cases/validate", { content });
+}
+
+export function preflightCase(caseId: string, env?: string): Promise<CasePreflightResult> {
+  const query = env ? `?env=${encodeURIComponent(env)}` : "";
+  return request.get<unknown, CasePreflightResult>(`/cases/${caseId}/preflight${query}`);
+}
+
+export function preflightCaseContent(content: string, env?: string): Promise<CasePreflightResult> {
+  return request.post<unknown, CasePreflightResult>("/cases/preflight", { content, env });
 }

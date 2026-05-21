@@ -9,7 +9,7 @@ interface ApiResponse<T> {
 
 export const request = axios.create({
   baseURL: getApiBaseUrl(),
-  timeout: 60000
+  timeout: Number(import.meta.env.VITE_APP_REQUEST_TIMEOUT_MS || 60_000)
 });
 
 request.interceptors.response.use(

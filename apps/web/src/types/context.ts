@@ -1,4 +1,4 @@
-export interface DowaletRouteNode {
+export interface AppRouteNode {
   path: string;
   fullPath: string;
   name?: string;
@@ -11,19 +11,30 @@ export interface DowaletRouteNode {
   id?: string;
 }
 
-export interface DowaletAuthSourceSummary {
-  source: "user" | "admin";
+export interface AppAuthSourceSummary {
+  source: string;
   authFile: string;
+  routeSourceKey?: string;
   profile: Record<string, unknown>;
   routeCount: number;
   visibleRouteCount: number;
-  enterpriseRoutes: DowaletRouteNode[];
-  approvalRoutes: DowaletRouteNode[];
+  routes: AppRouteNode[];
+  enterpriseRoutes: AppRouteNode[];
+  approvalRoutes: AppRouteNode[];
 }
 
-export interface DowaletContextSummary {
-  user: DowaletAuthSourceSummary;
-  admin: DowaletAuthSourceSummary;
+export interface AppContextSummary {
+  user: AppAuthSourceSummary;
+  admin: AppAuthSourceSummary;
+  sources: AppAuthSourceSummary[];
+}
+
+export interface AppContextSourceDetail {
+  source: string;
+  fileName: string;
+  content: string;
+  updatedAt?: string;
+  summary: AppAuthSourceSummary;
 }
 
 export interface DbHealthResult {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Card, Col, Empty, Modal, Row, Segmented, Space, Statistic, Table, Tag, Typography, message } from "antd";
 import { CopyOutlined, FileTextOutlined, FolderOpenOutlined } from "@ant-design/icons";
 import { useParams, useSearchParams } from "react-router-dom";
@@ -24,14 +24,16 @@ export default function ReportViewer() {
   const params = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [messageApi, contextHolder] = message.useMessage();
-  const { runId: latestRunId, run, setSummary, reset } = useRunStore();
-  const runId = params.runId === "latest" ? latestRunId || "latest" : params.runId;
+  const { run, setSummary, reset } = useRunStore();
+  const runId = params.runId === "latest" ? "latest" : params.runId;
   const [report, setReport] = useState<RunReport>();
   const [mode, setMode] = useState<ViewMode>(() => readViewMode(searchParams.get("mode")));
   const [logs, setLogs] = useState("");
   const [screenshotPreview, setScreenshotPreview] = useState<{ title: string; src: string }>();
   const [detailPreview, setDetailPreview] = useState<DetailPreview>();
   const [latestMissing, setLatestMissing] = useState(false);
+  const fullJson = useMemo(() => (report ? JSON.stringify(report, null, 2) : ""), [report]);
+  const displayJson = useMemo(() => truncateMiddle(fullJson, 140_000), [fullJson]);
 
   useEffect(() => {
     setMode(readViewMode(searchParams.get("mode")));
@@ -41,6 +43,8 @@ export default function ReportViewer() {
     if (!runId) return;
     let canceled = false;
     setLatestMissing(false);
+    setReport(undefined);
+    setLogs("");
 
     async function loadReport() {
       try {
@@ -50,7 +54,7 @@ export default function ReportViewer() {
           reset();
           setReport(undefined);
           setLogs("");
-          setLatestMissing(true);
+          setLatestMissing(params.runId === "latest");
           return;
         }
 
@@ -120,7 +124,7 @@ export default function ReportViewer() {
       {contextHolder}
       <PageHeader
         title="报告查看"
-        description={runId}
+        description={summary?.runId ?? runId}
         extra={
           <Segmented<ViewMode>
             value={mode}
@@ -176,10 +180,10 @@ export default function ReportViewer() {
                     <Statistic title="总步骤" value={summary.total} />
                   </Col>
                   <Col xs={12} xl={6}>
-                    <Statistic title="成功" value={summary.passed} valueStyle={{ color: "#16a34a" }} />
+                    <Statistic title="成功" value={summary.passed} styles={{ content: { color: "#16a34a" } }} />
                   </Col>
                   <Col xs={12} xl={6}>
-                    <Statistic title="失败" value={summary.failed} valueStyle={{ color: summary.failed ? "#dc2626" : undefined }} />
+                    <Statistic title="失败" value={summary.failed} styles={{ content: { color: summary.failed ? "#dc2626" : undefined } }} />
                   </Col>
                   <Col xs={12} xl={6}>
                     <Statistic title="跳过" value={summary.skipped} />
@@ -188,7 +192,7 @@ export default function ReportViewer() {
               </div>
               <div className="grid gap-[10px]">
                 {failureSummary ? (
-                  <Alert type="error" showIcon message="失败摘要" description={failureSummary} />
+                  <Alert type="error" showIcon title="失败摘要" description={failureSummary} />
                 ) : null}
                 <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
                   <Table<StepResult>
@@ -293,16 +297,16 @@ export default function ReportViewer() {
                 size="small"
                 icon={<CopyOutlined />}
                 className="!absolute !right-3 !top-3 !z-10 !border-slate-600 !bg-slate-800 !text-slate-100 hover:!border-blue-400 hover:!bg-slate-700 hover:!text-white"
-                onClick={() => void copyText(JSON.stringify(report, null, 2), "JSON 数据已复制")}
+                onClick={() => void copyText(fullJson, "JSON 数据已复制")}
               >
                 复制
               </Button>
               <pre className="m-0 min-h-[420px] w-full overflow-auto whitespace-pre-wrap break-words p-3.5 pr-24 pt-12 font-mono text-xs leading-relaxed text-slate-300 2xl:min-h-[520px]">
-                {JSON.stringify(report, null, 2)}
+                {displayJson}
               </pre>
             </div>
           ) : (
-            <Alert type="info" showIcon message="JSON 报告尚未生成" />
+            <Alert type="info" showIcon title="JSON 报告尚未生成" />
           )
         ) : null}
         {mode === "screenshots" ? (
@@ -433,6 +437,20 @@ function compactPreview(content: string): string {
   const normalized = content.replace(/\s+/g, " ").trim();
   if (normalized.length <= 72) return normalized;
   return `${normalized.slice(0, 72)}...`;
+}
+
+function truncateMiddle(content: string, maxChars: number): string {
+  if (content.length <= maxChars) {
+    return content;
+  }
+  const keep = Math.floor((maxChars - 120) / 2);
+  return [
+    content.slice(0, keep),
+    "",
+    `... 内容较大，中间部分已省略，仅用于页面预览。复制按钮仍会复制完整 JSON。原始长度：${content.length.toLocaleString()} 字符 ...`,
+    "",
+    content.slice(-keep)
+  ].join("\n");
 }
 
 function statusBadgeClass(status: string): string {

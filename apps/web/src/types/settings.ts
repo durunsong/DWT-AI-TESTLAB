@@ -17,6 +17,14 @@ export interface EnvFileConfig {
   missingKeys: string[];
 }
 
+export interface EnvFileContent {
+  env: TestEnv;
+  fileName: string;
+  exists: boolean;
+  updatedAt?: string;
+  content: string;
+}
+
 export interface RunSettings {
   env: TestEnv;
   headless: boolean;

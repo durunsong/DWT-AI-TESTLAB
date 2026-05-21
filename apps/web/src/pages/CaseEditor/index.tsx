@@ -1,15 +1,15 @@
-import { useEffect, useState } from "react";
-import { Alert, Button, Card, Col, Drawer, Form, Input, List, Row, Segmented, Space, Spin, Tag, Typography, message } from "antd";
-import { ArrowLeftOutlined, CheckCircleOutlined, CopyOutlined, PlayCircleOutlined, RobotOutlined, SaveOutlined } from "@ant-design/icons";
+import { type ReactNode, useEffect, useState } from "react";
+import { Alert, Button, Card, Col, Drawer, Form, Input, Row, Segmented, Space, Spin, Tag, Typography, message } from "antd";
+import { ArrowLeftOutlined, CheckCircleOutlined, CopyOutlined, PlayCircleOutlined, RobotOutlined, SafetyCertificateOutlined, SaveOutlined } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
 import { assistCaseYamlStream, type CaseYamlAssistMode } from "../../api/ai";
-import { getCase, saveCase, validateCase } from "../../api/cases";
+import { getCase, preflightCaseContent, saveCase, validateCase } from "../../api/cases";
 import { createTestRun } from "../../api/testRuns";
 import { PageHeader } from "../../components/PageHeader";
 import { YamlEditor } from "../../components/YamlEditor";
 import { useCaseStore } from "../../stores/useCaseStore";
 import { useSettingStore } from "../../stores/useSettingStore";
-import type { CaseValidationResult } from "../../types/case";
+import type { CasePreflightResult, CaseValidationResult } from "../../types/case";
 
 const aiModeOptions: Array<{ label: string; value: CaseYamlAssistMode }> = [
   { label: "AI 写", value: "write" },
@@ -40,6 +40,8 @@ export default function CaseEditor() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  const [preflighting, setPreflighting] = useState(false);
+  const [preflight, setPreflight] = useState<CasePreflightResult>();
   const [aiOpen, setAiOpen] = useState(false);
   const [aiMode, setAiMode] = useState<CaseYamlAssistMode>("continue");
   const [aiInstruction, setAiInstruction] = useState("");
@@ -94,6 +96,25 @@ export default function CaseEditor() {
     }
   }
 
+  async function handlePreflight(): Promise<CasePreflightResult | undefined> {
+    setPreflighting(true);
+    try {
+      const result = await preflightCaseContent(yaml, env);
+      setPreflight(result);
+      if (result.runnable) {
+        messageApi.success("运行前预检通过");
+      } else {
+        messageApi.warning(`运行前预检发现 ${result.summary.errors} 个错误`);
+      }
+      return result;
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : String(error));
+      return undefined;
+    } finally {
+      setPreflighting(false);
+    }
+  }
+
   function handleMetaChange(_: Partial<CaseMetaFormValues>, values: CaseMetaFormValues) {
     setYaml(updateYamlMeta(yaml, {
       caseId: normalizeCaseId(values.caseId),
@@ -109,6 +130,12 @@ export default function CaseEditor() {
       setValidation(validationResult);
       if (!validationResult.valid) {
         messageApi.error("DSL 校验失败，请先修复后再执行");
+        return;
+      }
+
+      const preflightResult = await handlePreflight();
+      if (!preflightResult?.runnable) {
+        messageApi.error("运行前预检未通过，请先修复错误后再执行");
         return;
       }
 
@@ -206,7 +233,7 @@ export default function CaseEditor() {
         <PageHeader title="用例编辑" description={caseId} />
         <Card className="min-h-[420px]">
           <div className="flex min-h-[360px] items-center justify-center">
-            <Spin tip="读取用例中">
+            <Spin description="读取用例中">
               <div className="h-12 w-36" />
             </Spin>
           </div>
@@ -228,6 +255,9 @@ export default function CaseEditor() {
             </Button>
             <Button icon={<CheckCircleOutlined />} onClick={() => void handleValidate()}>
               校验
+            </Button>
+            <Button icon={<SafetyCertificateOutlined />} loading={preflighting} onClick={() => void handlePreflight()}>
+              预检
             </Button>
             <Button icon={<RobotOutlined />} onClick={() => openAiAssistant()}>
               AI 助手
@@ -285,7 +315,10 @@ export default function CaseEditor() {
               </Row>
             </Form>
           </Card>
-          <Card className="overflow-hidden [&_.ant-card-body]:p-0">
+          <Card
+            className="overflow-hidden [&_.ant-card-body]:bg-[#1e1e1e] [&_.ant-card-body]:p-0"
+            style={{ backgroundColor: "#1e1e1e", borderColor: "#1e1e1e" }}
+          >
             <YamlEditor value={yaml} onChange={setYaml} />
           </Card>
         </Col>
@@ -310,25 +343,53 @@ export default function CaseEditor() {
             extra={validation ? <Tag color={validation.valid ? "success" : "error"}>{validation.valid ? "通过" : "失败"}</Tag> : null}
           >
             {!validation ? (
-              <Alert type="info" showIcon message="尚未校验" description="保存会自动校验，也可以先手动校验 YAML DSL。" />
+              <Alert type="info" showIcon title="尚未校验" description="保存会自动校验，也可以先手动校验 YAML DSL。" />
             ) : validation.valid ? (
-              <Alert type="success" showIcon message="校验通过" description={`${validation.caseId ?? "-"} · ${validation.caseName ?? "-"}`} />
+              <Alert type="success" showIcon title="校验通过" description={`${validation.caseId ?? "-"} · ${validation.caseName ?? "-"}`} />
             ) : (
-              <List
-                dataSource={validation.issues}
-                renderItem={(item) => (
-                  <List.Item>
-                    <List.Item.Meta title={item.path} description={item.message} />
-                  </List.Item>
-                )}
+              <IssueStack>
+                {validation.issues.map((item) => (
+                  <IssueItem key={`${item.path}-${item.message}`} title={item.path} description={item.message} />
+                ))}
+              </IssueStack>
+            )}
+          </Card>
+          <Card
+            title="运行前预检"
+            className="mt-2.5"
+            extra={preflight ? <Tag color={preflight.runnable ? "success" : "error"}>{preflight.runnable ? "可执行" : "需修复"}</Tag> : null}
+          >
+            {!preflight ? (
+              <Alert type="info" showIcon title="尚未预检" description="预检会检查环境变量、定位文件、API baseUrl、DB 开关和上传文件等运行前风险。" />
+            ) : preflight.runnable ? (
+              <Alert
+                type="success"
+                showIcon
+                title="预检通过"
+                description={`${preflight.summary.steps} 步 · Web ${preflight.summary.webSteps} · API ${preflight.summary.apiSteps} · DB ${preflight.summary.dbSteps}`}
               />
+            ) : (
+              <IssueStack>
+                {preflight.issues.map((item) => (
+                  <IssueItem
+                    key={`${item.path}-${item.code}-${item.message}`}
+                    title={
+                      <Space>
+                        <Tag color={item.severity === "error" ? "error" : "warning"}>{item.severity}</Tag>
+                        <span>{item.path}</span>
+                      </Space>
+                    }
+                    description={`${item.code} · ${item.message}`}
+                  />
+                ))}
+              </IssueStack>
             )}
           </Card>
         </Col>
       </Row>
       <Drawer
         title="AI YAML 助手"
-        width="min(920px, 92vw)"
+        size="min(920px, 92vw)"
         open={aiOpen}
         destroyOnHidden={false}
         extra={
@@ -349,9 +410,9 @@ export default function CaseEditor() {
         <div className="grid h-full min-h-0 grid-cols-1 gap-2.5 xl:grid-cols-[280px_minmax(0,1fr)]">
           <div className="space-y-2.5">
             <Card size="small" title="生成模式">
-              <Space direction="vertical" size={12} className="w-full">
+              <Space orientation="vertical" size={12} className="w-full">
                 <Segmented<CaseYamlAssistMode> block value={aiMode} options={aiModeOptions} onChange={setAiMode} />
-                <Alert type="info" showIcon message={aiModeTips[aiMode]} />
+                <Alert type="info" showIcon title={aiModeTips[aiMode]} />
               </Space>
             </Card>
             <Card size="small" title="补充要求">
@@ -366,11 +427,11 @@ export default function CaseEditor() {
               <Alert
                 type={aiValidation.valid ? "success" : "warning"}
                 showIcon
-                message={aiValidation.valid ? "草稿校验通过" : "草稿仍需调整"}
+                title={aiValidation.valid ? "草稿校验通过" : "草稿仍需调整"}
                 description={aiValidation.valid ? `${aiValidation.caseId ?? "-"} · ${aiValidation.caseName ?? "-"}` : `${aiValidation.issues.length} 个问题`}
               />
             ) : null}
-            {aiError ? <Alert type="error" showIcon message="AI 生成失败" description={aiError} /> : null}
+            {aiError ? <Alert type="error" showIcon title="AI 生成失败" description={aiError} /> : null}
           </div>
           <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-950">
             <div className="flex min-h-[44px] items-center justify-between border-b border-slate-800 px-3 text-slate-200">
@@ -385,6 +446,19 @@ export default function CaseEditor() {
           </div>
         </div>
       </Drawer>
+    </div>
+  );
+}
+
+function IssueStack({ children }: { children: ReactNode }) {
+  return <div className="divide-y divide-slate-100">{children}</div>;
+}
+
+function IssueItem({ title, description }: { title: ReactNode; description: ReactNode }) {
+  return (
+    <div className="py-3 first:pt-0 last:pb-0">
+      <div className="mb-1 text-sm text-slate-900">{title}</div>
+      <div className="text-sm text-slate-500">{description}</div>
     </div>
   );
 }

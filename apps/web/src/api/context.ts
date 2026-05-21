@@ -1,8 +1,27 @@
 import { request } from "./request";
-import type { DbHealthResult, DowaletContextSummary } from "../types/context";
+import type { AppAuthSourceSummary, AppContextSourceDetail, AppContextSummary, DbHealthResult } from "../types/context";
 
-export function getDowaletContext(): Promise<DowaletContextSummary> {
-  return request.get<unknown, DowaletContextSummary>("/dowalet/context");
+export function getAppContext(): Promise<AppContextSummary> {
+  return request.get<unknown, AppContextSummary>("/app/context");
+}
+
+export function parseAppContextSource(input: { source: string; fileName: string; content: string }): Promise<AppAuthSourceSummary> {
+  return request.post<unknown, AppAuthSourceSummary>("/app/context/parse", input);
+}
+
+export function getAppContextSource(source: string): Promise<AppContextSourceDetail> {
+  return request.get<unknown, AppContextSourceDetail>(`/app/context/sources/${source}`);
+}
+
+export function saveAppContextSource(input: { source: string; fileName: string; content: string }): Promise<AppContextSourceDetail> {
+  return request.put<unknown, AppContextSourceDetail>(`/app/context/sources/${input.source}`, {
+    fileName: input.fileName,
+    content: input.content
+  });
+}
+
+export function deleteAppContextSource(source: string): Promise<AppContextSummary> {
+  return request.delete<unknown, AppContextSummary>(`/app/context/sources/${source}`);
 }
 
 export function getDbHealth(): Promise<DbHealthResult> {

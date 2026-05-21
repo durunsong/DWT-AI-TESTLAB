@@ -20,6 +20,14 @@ export async function registerCaseRoutes(app: FastifyInstance, caseService: Case
     return ok(await caseService.createCaseFromYaml(caseService.normalizeGeneratedYaml(request.body.content), request.body.caseId));
   });
 
+  app.post<{ Body: { content: string; env?: string } }>("/api/cases/preflight", async (request) => {
+    return ok(await caseService.preflightContent(request.body.content, request.body.env));
+  });
+
+  app.get<{ Params: { caseId: string }; Querystring: { env?: string } }>("/api/cases/:caseId/preflight", async (request) => {
+    return ok(await caseService.preflightCase(request.params.caseId, request.query.env));
+  });
+
   app.get<{ Params: { caseId: string } }>("/api/cases/:caseId", async (request) => {
     return ok(await caseService.getCase(request.params.caseId));
   });

@@ -49,8 +49,17 @@ export interface ScenarioStep {
   session?: SessionName;
   target?: string;
   url?: string;
+  method?: string;
+  headers?: Record<string, string>;
+  query?: Record<string, string | number | boolean | null>;
+  body?: unknown;
   value?: string;
   expected?: string | DbExpected;
+  expected_status?: number;
+  body_path?: string;
+  business_code_path?: string;
+  success_codes?: ApiExpectedValue[];
+  failure_codes?: ApiExpectedValue[];
   variable?: string;
   save_as?: string;
   sql?: string;

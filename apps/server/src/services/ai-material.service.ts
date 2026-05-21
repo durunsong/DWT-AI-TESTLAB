@@ -12,14 +12,23 @@ export interface AiMaterialSource {
   content: string;
 }
 
-const maxFileBytes = 8 * 1024 * 1024;
-const maxSourceChars = 18_000;
-const maxLinkChars = 24_000;
+export interface AiMaterialLimits {
+  materialFileMaxMb: number;
+  materialSourceMaxChars: number;
+  materialLinkMaxChars: number;
+}
+
+const defaultLimits: AiMaterialLimits = {
+  materialFileMaxMb: 8,
+  materialSourceMaxChars: 18_000,
+  materialLinkMaxChars: 24_000
+};
 const textFilePattern = /\.(txt|md|markdown|csv|json|yaml|yml)$/i;
 const imageMimeTypes = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp"]);
 
-export async function extractMaterialFiles(files: AiMaterialFile[] = []): Promise<AiMaterialSource[]> {
+export async function extractMaterialFiles(files: AiMaterialFile[] = [], limits: AiMaterialLimits = defaultLimits): Promise<AiMaterialSource[]> {
   const sources: AiMaterialSource[] = [];
+  const maxFileBytes = materialMaxFileBytes(limits);
 
   for (const file of files) {
     if (isImageMaterialFile(file)) {
@@ -28,13 +37,13 @@ export async function extractMaterialFiles(files: AiMaterialFile[] = []): Promis
 
     const buffer = Buffer.from(file.base64, "base64");
     if (buffer.byteLength > maxFileBytes) {
-      throw new Error(`${file.name} 超过 8MB，请拆分或精简后再上传`);
+      throw new Error(`${file.name} 超过 ${limits.materialFileMaxMb}MB，请拆分或精简后再上传`);
     }
 
     const content = await extractFileText(file.name, file.mimeType, buffer);
     sources.push({
       title: `上传文件：${file.name}`,
-      content: truncate(content, maxSourceChars)
+      content: truncate(content, limits.materialSourceMaxChars)
     });
   }
 
@@ -45,10 +54,10 @@ export function isImageMaterialFile(file: AiMaterialFile): boolean {
   return imageMimeTypes.has((file.mimeType ?? "").toLowerCase()) || /\.(png|jpe?g|webp)$/i.test(file.name);
 }
 
-export function imageMaterialToDataUrl(file: AiMaterialFile): { title: string; dataUrl: string } {
+export function imageMaterialToDataUrl(file: AiMaterialFile, limits: AiMaterialLimits = defaultLimits): { title: string; dataUrl: string } {
   const buffer = Buffer.from(file.base64, "base64");
-  if (buffer.byteLength > maxFileBytes) {
-    throw new Error(`${file.name} 超过 8MB，请压缩后再上传`);
+  if (buffer.byteLength > materialMaxFileBytes(limits)) {
+    throw new Error(`${file.name} 超过 ${limits.materialFileMaxMb}MB，请压缩后再上传`);
   }
 
   const mimeType = normalizeImageMimeType(file);
@@ -62,7 +71,7 @@ export function imageMaterialToDataUrl(file: AiMaterialFile): { title: string; d
   };
 }
 
-export async function fetchMaterialLinks(urls: string[] = []): Promise<AiMaterialSource[]> {
+export async function fetchMaterialLinks(urls: string[] = [], limits: AiMaterialLimits = defaultLimits): Promise<AiMaterialSource[]> {
   const sources: AiMaterialSource[] = [];
 
   for (const rawUrl of urls.map((item) => item.trim()).filter(Boolean)) {
@@ -70,7 +79,7 @@ export async function fetchMaterialLinks(urls: string[] = []): Promise<AiMateria
     const response = await fetch(url, {
       headers: {
         accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5",
-        "user-agent": `${process.env.APP_PRODUCT_NAME || "AI E2E Test"}-AI-Material-Importer/1.0`
+        "user-agent": `${process.env.APP_PRODUCT_NAME || "Custom Test Platform"}-AI-Material-Importer/1.0`
       },
       signal: AbortSignal.timeout(12_000)
     });
@@ -82,7 +91,7 @@ export async function fetchMaterialLinks(urls: string[] = []): Promise<AiMateria
     const text = await response.text();
     sources.push({
       title: `文档链接：${url}`,
-      content: truncate(stripHtml(text), maxLinkChars)
+      content: truncate(stripHtml(text), limits.materialLinkMaxChars)
     });
   }
 
@@ -172,4 +181,8 @@ function normalizeImageMimeType(file: AiMaterialFile): string | undefined {
   if (/\.jpe?g$/i.test(file.name)) return "image/jpeg";
   if (/\.webp$/i.test(file.name)) return "image/webp";
   return undefined;
+}
+
+function materialMaxFileBytes(limits: AiMaterialLimits): number {
+  return Math.max(1, Math.floor(limits.materialFileMaxMb * 1024 * 1024));
 }

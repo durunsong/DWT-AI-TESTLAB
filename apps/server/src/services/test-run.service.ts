@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { buildFailureAnalysisMessages, OpenAiCompatibleClient } from "@ai-e2e/ai-generator";
-import { ScenarioOrchestrator } from "@ai-e2e/runner";
+import { resolveArtifactBaseDir, ScenarioOrchestrator, type PlatformArtifactKind, type PlatformConfig } from "@ai-e2e/runner";
 import { maskSensitive, type CreateTestRunRequest, type RunReport, type StepResult, type TestRunEvent, type TestRunSummary } from "@ai-e2e/shared";
 import { imageMimeType } from "./ai-screenshot";
 import type { EnvConfigService } from "./env-config.service";
@@ -16,7 +16,8 @@ export class TestRunService {
   constructor(
     private readonly runner: ScenarioOrchestrator,
     private readonly rootDir: string,
-    private readonly envConfigService?: EnvConfigService
+    private readonly envConfigService?: EnvConfigService,
+    private readonly platformConfig?: PlatformConfig
   ) {
     this.events.setMaxListeners(100);
   }
@@ -24,7 +25,7 @@ export class TestRunService {
   async start(request: CreateTestRunRequest): Promise<TestRunSummary> {
     const env = normalizeTestEnv(request.env);
     await this.envConfigService?.applyToProcess(env);
-    const runId = await createNextRunId(this.rootDir, request.caseId);
+    const runId = await createNextRunId(this.rootDir, request.caseId, this.platformConfig);
     const startedAt = new Date().toISOString();
     const summary: TestRunSummary = {
       runId,
@@ -231,8 +232,9 @@ export class TestRunService {
     };
   }
 
-  assetPath(...segments: string[]): string {
-    return path.resolve(this.rootDir, ...segments);
+  artifactPath(kind: PlatformArtifactKind, ...segments: string[]): string {
+    const baseDir = this.platformConfig ? resolveArtifactBaseDir(this.rootDir, this.platformConfig, kind) : path.resolve(this.rootDir, kind);
+    return path.resolve(baseDir, ...segments);
   }
 }
 

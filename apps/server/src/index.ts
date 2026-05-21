@@ -2,17 +2,17 @@ import fs from "node:fs";
 import path from "node:path";
 import dotenv from "dotenv";
 import Fastify, { type FastifyInstance } from "fastify";
-import { ScenarioOrchestrator } from "@ai-e2e/runner";
+import { loadPlatformConfig, type PlatformConfig, ScenarioOrchestrator } from "@ai-e2e/runner";
 import { registerAiRoutes } from "./routes/ai.routes";
 import { registerCaseRoutes } from "./routes/cases.routes";
 import { registerDbRoutes } from "./routes/db.routes";
-import { registerDowaletContextRoutes } from "./routes/dowalet-context.routes";
+import { registerAppContextRoutes } from "./routes/app-context.routes";
 import { registerSettingsRoutes } from "./routes/settings.routes";
 import { registerTestRunEventRoutes } from "./routes/test-run-events.routes";
 import { registerTestRunRoutes } from "./routes/test-runs.routes";
 import { CaseService } from "./services/case.service";
 import { DbService } from "./services/db.service";
-import { DowaletContextService } from "./services/dowalet-context.service";
+import { AppContextService } from "./services/app-context.service";
 import { EnvConfigService } from "./services/env-config.service";
 import { ReportService } from "./services/report.service";
 import { TestRunService } from "./services/test-run.service";
@@ -41,23 +41,24 @@ export interface StartedServer {
 export async function createServer(options: CreateServerOptions): Promise<FastifyInstance> {
   const rootDir = path.resolve(options.rootDir);
   dotenv.config({ path: path.resolve(rootDir, ".env") });
+  const platformConfig = loadPlatformConfig(rootDir);
 
   const app = Fastify({ logger: options.logger ?? true });
-  registerCors(app);
+  registerCors(app, platformConfig.server.corsOrigins);
 
   const runner = new ScenarioOrchestrator(rootDir);
   const envConfigService = new EnvConfigService(rootDir);
-  const caseService = new CaseService(runner, rootDir);
-  const testRunService = new TestRunService(runner, rootDir, envConfigService);
-  const reportService = new ReportService(rootDir);
-  const dowaletContextService = new DowaletContextService(rootDir);
+  const caseService = new CaseService(runner, rootDir, envConfigService);
+  const testRunService = new TestRunService(runner, rootDir, envConfigService, platformConfig);
+  const reportService = new ReportService(rootDir, platformConfig);
+  const appContextService = new AppContextService(rootDir, platformConfig);
   const dbService = new DbService();
 
   await registerCaseRoutes(app, caseService);
   await registerTestRunRoutes(app, testRunService, reportService);
   await registerTestRunEventRoutes(app, testRunService);
-  await registerAiRoutes(app, rootDir);
-  await registerDowaletContextRoutes(app, dowaletContextService);
+  await registerAiRoutes(app, rootDir, platformConfig);
+  await registerAppContextRoutes(app, appContextService);
   await registerDbRoutes(app, dbService);
   await registerSettingsRoutes(app, envConfigService);
 
@@ -71,12 +72,14 @@ export async function createServer(options: CreateServerOptions): Promise<Fastif
 
 export async function startServer(options: StartServerOptions = {}): Promise<StartedServer> {
   const rootDir = path.resolve(options.rootDir ?? findWorkspaceRoot(process.cwd()));
-  const host = options.host ?? "0.0.0.0";
+  const platformConfig = loadPlatformConfig(rootDir);
+  const host = options.host ?? process.env.SERVER_HOST ?? platformConfig.server.host;
   const app = await createServer({ rootDir, logger: options.logger });
-  await app.listen({ port: options.port ?? Number(process.env.SERVER_PORT ?? 4300), host });
+  const configuredPort = Number(process.env.SERVER_PORT ?? platformConfig.server.port);
+  await app.listen({ port: options.port ?? configuredPort, host });
 
   const address = app.server.address();
-  const port = typeof address === "object" && address ? address.port : Number(process.env.SERVER_PORT ?? 4300);
+  const port = typeof address === "object" && address ? address.port : configuredPort;
   const originHost = host === "0.0.0.0" ? "127.0.0.1" : host;
 
   return {
@@ -103,9 +106,13 @@ function findWorkspaceRoot(startDir: string): string {
   }
 }
 
-function registerCors(app: FastifyInstance): void {
+function registerCors(app: FastifyInstance, allowedOrigins: PlatformConfig["server"]["corsOrigins"]): void {
   app.addHook("onRequest", (request, reply, done) => {
-    reply.header("Access-Control-Allow-Origin", "*");
+    const origin = request.headers.origin;
+    const allowedOrigin = resolveCorsOrigin(typeof origin === "string" ? origin : undefined, allowedOrigins);
+    if (allowedOrigin) {
+      reply.header("Access-Control-Allow-Origin", allowedOrigin);
+    }
     reply.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
     reply.header("Access-Control-Allow-Headers", "content-type,authorization");
     if (request.method === "OPTIONS") {
@@ -116,13 +123,25 @@ function registerCors(app: FastifyInstance): void {
   });
 }
 
+function resolveCorsOrigin(origin: string | undefined, allowedOrigins: string[]): string | undefined {
+  if (allowedOrigins.includes("*")) {
+    return "*";
+  }
+  if (origin && allowedOrigins.includes(origin)) {
+    return origin;
+  }
+  return undefined;
+}
+
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
 if (isDirectRun()) {
-  const port = Number(process.env.SERVER_PORT ?? 4300);
-  void startServer({ port, host: "0.0.0.0" }).catch((error: unknown) => {
+  const platformConfig = loadPlatformConfig(findWorkspaceRoot(process.cwd()));
+  const port = Number(process.env.SERVER_PORT ?? platformConfig.server.port);
+  const host = process.env.SERVER_HOST ?? platformConfig.server.host;
+  void startServer({ port, host }).catch((error: unknown) => {
     console.error(error);
     process.exit(1);
   });

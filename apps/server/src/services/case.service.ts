@@ -1,7 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { ScenarioOrchestrator, validateScenarioContent } from "@ai-e2e/runner";
+import { preflightScenarioContent, ScenarioOrchestrator, validateScenarioContent } from "@ai-e2e/runner";
 import YAML from "yaml";
+import type { EnvConfigService } from "./env-config.service";
+import { normalizeTestEnv } from "./env-config.service";
 
 export interface CaseValidationIssue {
   path: string;
@@ -27,7 +29,8 @@ export interface CreateCaseInput {
 export class CaseService {
   constructor(
     _runner: ScenarioOrchestrator,
-    private readonly rootDir: string
+    private readonly rootDir: string,
+    private readonly envConfigService?: EnvConfigService
   ) {}
 
   async listCases() {
@@ -293,6 +296,27 @@ export class CaseService {
         issues: [{ path: "yaml", message: error instanceof Error ? error.message : String(error) }]
       };
     }
+  }
+
+  async preflightCase(caseId: string, env = process.env.TEST_ENV ?? "local") {
+    const normalizedEnv = normalizeTestEnv(env);
+    await this.envConfigService?.applyToProcess(normalizedEnv);
+    const filePath = await this.findScenarioPath(caseId);
+    return preflightScenarioContent({
+      rootDir: this.rootDir,
+      content: await fs.readFile(filePath, "utf8"),
+      env: normalizedEnv
+    });
+  }
+
+  async preflightContent(content: string, env = process.env.TEST_ENV ?? "local") {
+    const normalizedEnv = normalizeTestEnv(env);
+    await this.envConfigService?.applyToProcess(normalizedEnv);
+    return preflightScenarioContent({
+      rootDir: this.rootDir,
+      content,
+      env: normalizedEnv
+    });
   }
 
   private async findScenarioPath(caseId: string): Promise<string> {

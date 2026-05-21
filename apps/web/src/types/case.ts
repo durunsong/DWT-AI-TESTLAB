@@ -38,6 +38,32 @@ export interface CaseValidationResult {
   issues: CaseValidationIssue[];
 }
 
+export type PreflightSeverity = "error" | "warning";
+
+export interface CasePreflightIssue {
+  severity: PreflightSeverity;
+  code: string;
+  path: string;
+  message: string;
+}
+
+export interface CasePreflightResult {
+  runnable: boolean;
+  caseId?: string;
+  caseName?: string;
+  env: string;
+  summary: {
+    steps: number;
+    webSteps: number;
+    apiSteps: number;
+    dbSteps: number;
+    missingEnvVars: string[];
+    warnings: number;
+    errors: number;
+  };
+  issues: CasePreflightIssue[];
+}
+
 export interface SaveCaseResult {
   saved: boolean;
   caseId?: string;

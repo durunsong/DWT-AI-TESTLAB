@@ -5,9 +5,17 @@ dist/
 !.env.example
 reports/*.json
 reports/*.html
+reports/**/*
 logs/*.log
+logs/**/*
+uploads/app-context/
+uploads/**/*
 screenshots/**/*
 traces/**/*
 test-results/
 playwright-report/
 apps/desktop/browsers.json
+.DS_Store
+Thumbs.db
+*.local
+.dev-server.log

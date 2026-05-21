@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { resolveArtifactBaseDir, platformArtifactKinds, type PlatformConfig } from "@ai-e2e/runner";
 import type { RunReport, TestRunSummary } from "@ai-e2e/shared";
 
 export type ArtifactKind = "logs" | "screenshots" | "reports" | "traces";
@@ -38,17 +39,20 @@ export interface DeleteRunHistoryResult {
 }
 
 export class ReportService {
-  constructor(private readonly rootDir: string) {}
+  constructor(
+    private readonly rootDir: string,
+    private readonly platformConfig?: PlatformConfig
+  ) {}
 
   async readJsonReport(runId: string): Promise<unknown> {
     const safeRunId = await this.resolveRunId(runId);
-    const file = path.resolve(this.rootDir, "reports", `${safeRunId}.json`);
+    const file = path.resolve(this.artifactDir("reports"), `${safeRunId}.json`);
     return JSON.parse(await fs.readFile(file, "utf8"));
   }
 
   async readLog(runId: string): Promise<string> {
     const safeRunId = await this.resolveRunId(runId);
-    const file = path.resolve(this.rootDir, "logs", `${safeRunId}.log`);
+    const file = path.resolve(this.artifactDir("logs"), `${safeRunId}.log`);
     return fs.readFile(file, "utf8");
   }
 
@@ -189,7 +193,7 @@ export class ReportService {
     if (!this.isArtifactKind(kind)) {
       throw new Error(`不支持的产物类型：${kind}`);
     }
-    const dir = path.resolve(this.rootDir, kind);
+    const dir = this.platformConfig ? resolveArtifactBaseDir(this.rootDir, this.platformConfig, kind) : path.resolve(this.rootDir, kind);
     this.assertInsideRoot(dir);
     return dir;
   }
@@ -231,6 +235,6 @@ export class ReportService {
   }
 
   private isArtifactKind(value: string): value is ArtifactKind {
-    return ["logs", "screenshots", "reports", "traces"].includes(value);
+    return platformArtifactKinds.includes(value as ArtifactKind);
   }
 }

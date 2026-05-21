@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import type { FastifyInstance } from "fastify";
+import { megabytesToBytes, type PlatformConfig } from "@ai-e2e/runner";
 import {
   buildCaseGenerationPrompt,
   buildMaterialCaseGenerationPrompt,
@@ -12,7 +13,9 @@ import { extractMaterialFiles, fetchMaterialLinks, imageMaterialToDataUrl, isIma
 import { imageMimeType, resolveScreenshotPath } from "../services/ai-screenshot";
 import { ok } from "../utils/response";
 
-export async function registerAiRoutes(app: FastifyInstance, rootDir: string): Promise<void> {
+export async function registerAiRoutes(app: FastifyInstance, rootDir: string, platformConfig: PlatformConfig): Promise<void> {
+  const materialBodyLimit = Math.max(megabytesToBytes(platformConfig.uploads.materialFileMaxMb) * 2, 1024 * 1024);
+
   app.post<{ Body: { requirement: string } }>("/api/ai/prompts/case", async (request) => {
     return ok({ prompt: buildCaseGenerationPrompt(request.body.requirement) });
   });
@@ -25,7 +28,7 @@ export async function registerAiRoutes(app: FastifyInstance, rootDir: string): P
   app.post<{ Body: { screenshotPath: string; stepId?: string; error?: string } }>(
     "/api/ai/analyze-screenshot",
     async (request) => {
-      const filePath = resolveScreenshotPath(rootDir, request.body.screenshotPath);
+      const filePath = resolveScreenshotPath(rootDir, request.body.screenshotPath, platformConfig);
       const image = await fs.readFile(filePath);
       const imageDataUrl = `data:${imageMimeType(filePath)};base64,${image.toString("base64")}`;
       const client = new OpenAiCompatibleClient();
@@ -50,7 +53,7 @@ export async function registerAiRoutes(app: FastifyInstance, rootDir: string): P
       });
 
       try {
-        const filePath = resolveScreenshotPath(rootDir, request.body.screenshotPath);
+        const filePath = resolveScreenshotPath(rootDir, request.body.screenshotPath, platformConfig);
         const image = await fs.readFile(filePath);
         const imageDataUrl = `data:${imageMimeType(filePath)};base64,${image.toString("base64")}`;
         const client = new OpenAiCompatibleClient();
@@ -98,17 +101,17 @@ export async function registerAiRoutes(app: FastifyInstance, rootDir: string): P
       docUrls?: string[];
       files?: AiMaterialFile[];
     };
-  }>("/api/ai/cases/material-draft", async (request) => {
+  }>("/api/ai/cases/material-draft", { bodyLimit: materialBodyLimit }, async (request) => {
     const sources = [
       request.body.prdText?.trim()
         ? { title: "粘贴的 PRD / 需求说明", content: request.body.prdText.trim() }
         : undefined,
-      ...await fetchMaterialLinks(request.body.docUrls),
-      ...await extractMaterialFiles(request.body.files)
+      ...await fetchMaterialLinks(request.body.docUrls, platformConfig.uploads),
+      ...await extractMaterialFiles(request.body.files, platformConfig.uploads)
     ].filter((item): item is { title: string; content: string } => Boolean(item?.content));
     const imageMaterials = (request.body.files ?? [])
       .filter(isImageMaterialFile)
-      .map(imageMaterialToDataUrl);
+      .map((file) => imageMaterialToDataUrl(file, platformConfig.uploads));
 
     if (!sources.length && !imageMaterials.length && !request.body.requirement?.trim()) {
       throw new Error("请至少提供 PRD 文本、文档链接、上传文件或补充要求中的一项");

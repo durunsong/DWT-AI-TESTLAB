@@ -1,5 +1,6 @@
 import { Button, Empty, Space } from "antd";
 import { CopyOutlined } from "@ant-design/icons";
+import { useMemo } from "react";
 import { maskText } from "../utils/mask";
 import { cn } from "../utils/cn";
 
@@ -7,10 +8,21 @@ interface LogTerminalProps {
   logs: string[] | string;
   heightClassName?: string;
   className?: string;
+  maxDisplayChars?: number;
 }
 
-export function LogTerminal({ logs, heightClassName = "h-[360px]", className }: LogTerminalProps) {
-  const content = Array.isArray(logs) ? logs.join("\n") : logs;
+export function LogTerminal({ logs, heightClassName = "h-[360px]", className, maxDisplayChars = 80_000 }: LogTerminalProps) {
+  const content = useMemo(() => (Array.isArray(logs) ? logs.join("\n") : logs), [logs]);
+  const { displayContent, truncated } = useMemo(() => {
+    if (!content || content.length <= maxDisplayChars) {
+      return { displayContent: content, truncated: false };
+    }
+    return {
+      displayContent: content.slice(-maxDisplayChars),
+      truncated: true
+    };
+  }, [content, maxDisplayChars]);
+  const maskedDisplayContent = useMemo(() => maskText(displayContent), [displayContent]);
 
   async function copy() {
     if (content) {
@@ -35,7 +47,8 @@ export function LogTerminal({ logs, heightClassName = "h-[360px]", className }: 
             heightClassName
           )}
         >
-          {maskText(content)}
+          {truncated ? `日志较长，仅显示最后 ${maxDisplayChars.toLocaleString()} 个字符，复制仍会复制完整日志。\n\n` : ""}
+          {maskedDisplayContent}
         </pre>
       ) : (
         <div className={cn("flex min-h-0 flex-1 items-center justify-center", heightClassName)}>

@@ -52,6 +52,7 @@ const templateOptions: Array<{ label: string; value: CreateCaseTemplate; descrip
     description: "创建 user 提交 KYC、admin 登录并审核通过的端到端流程骨架。"
   }
 ];
+const materialUploadMaxMb = Number(import.meta.env.VITE_APP_UPLOAD_MAX_MB || 8);
 
 interface TemplateDraft {
   mode: ScenarioMode;
@@ -499,7 +500,7 @@ export default function CaseList() {
         confirmLoading={creating}
         destroyOnHidden
         forceRender
-        maskClosable={!creating}
+        mask={{ closable: !creating }}
         styles={{ body: { maxHeight: "calc(100vh - 220px)", overflowY: "auto", paddingRight: 8, paddingBottom: 88 } }}
         onOk={() => void handleCreateCase()}
         onCancel={() => {
@@ -510,7 +511,7 @@ export default function CaseList() {
           className="mb-2.5"
           type="info"
           showIcon
-          message={createMode === "ai" ? "AI 会根据资料生成可编辑的 YAML 用例" : "新建后会生成一份可校验的 YAML 草稿"}
+          title={createMode === "ai" ? "AI 会根据资料生成可编辑的 YAML 用例" : "新建后会生成一份可校验的 YAML 草稿"}
           description="账号、密码、token 和地址仍然引用 .env 变量，不会写死到用例文件里。创建后可以继续用编辑页的 AI 助手补充步骤。"
         />
         <Form<CreateCaseFormValues>
@@ -665,10 +666,10 @@ export default function CaseList() {
               <Form.Item label="粘贴 PRD / 需求说明" name="prdText">
                 <Input.TextArea rows={6} placeholder="可以直接粘贴产品 PRD、验收标准、流程说明、接口约束或页面规则。" />
               </Form.Item>
-              <Form.Item label="开源文档链接" name="docUrlsText" extra="每行一个公开 http/https 链接；为安全起见，不读取 localhost 或内网地址。">
+              <Form.Item label="公开文档链接" name="docUrlsText" extra="每行一个公开 http/https 链接；为安全起见，不读取 localhost 或内网地址。">
                 <Input.TextArea rows={3} placeholder={"https://example.com/docs/getting-started\nhttps://example.com/api"} />
               </Form.Item>
-              <Form.Item label="导入资料" extra="支持 docx、PDF、Markdown、TXT、JSON、YAML，以及 PNG/JPG/WebP 图片；单文件最大 8MB。">
+              <Form.Item label="导入资料" extra={`支持 docx、PDF、Markdown、TXT、JSON、YAML，以及 PNG/JPG/WebP 图片；单文件最大 ${materialUploadMaxMb}MB。`}>
                 <Upload.Dragger
                   multiple
                   fileList={materialFiles}
@@ -697,8 +698,8 @@ async function readUploadFileAsBase64(file: UploadFile): Promise<{ name: string;
   if (!rawFile) {
     throw new Error(`${file.name} 文件读取失败`);
   }
-  if (rawFile.size > 8 * 1024 * 1024) {
-    throw new Error(`${file.name} 超过 8MB，请拆分或精简后再上传`);
+  if (rawFile.size > materialUploadMaxMb * 1024 * 1024) {
+    throw new Error(`${file.name} 超过 ${materialUploadMaxMb}MB，请拆分或精简后再上传`);
   }
 
   const dataUrl = await new Promise<string>((resolve, reject) => {

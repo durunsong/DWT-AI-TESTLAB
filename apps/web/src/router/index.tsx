@@ -37,7 +37,7 @@ function route(element: ReactNode) {
 function PageLoading() {
   return (
     <div className="flex min-h-[360px] items-center justify-center rounded-lg border border-slate-200 bg-white">
-      <Spin tip="页面加载中">
+      <Spin description="页面加载中">
         <div className="h-12 w-36" />
       </Spin>
     </div>
