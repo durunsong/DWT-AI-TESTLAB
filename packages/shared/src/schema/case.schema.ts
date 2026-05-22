@@ -13,7 +13,7 @@ export const scenarioCaseSchema = z.object({
   case_id: z.string().min(1),
   case_name: z.string().min(1),
   description: z.string().optional(),
-  mode: z.enum(["web", "hybrid"]).default("web"),
+  mode: z.enum(["web", "api", "hybrid"]).default("web"),
   defaults: z.object({
     step_timeout_ms: z.number().int().positive().optional(),
     wait_for_network: z.boolean().optional(),

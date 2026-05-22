@@ -30,6 +30,7 @@ export const scenarioStepSchema = z.object({
   step_id: z.string().min(1),
   name: z.string().min(1),
   type: z.enum(STEP_TYPES),
+  phase: z.enum(["beforeActions", "mainSteps", "assertions", "afterActions", "steps"]).optional(),
   session: z.enum(SESSION_NAMES).optional(),
   target: z.string().optional(),
   url: z.string().optional(),

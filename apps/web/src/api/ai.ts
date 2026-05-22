@@ -1,5 +1,6 @@
 import { request } from "./request";
 import { apiUrl } from "./base-url";
+import { AI_MATERIAL_DRAFT_TIMEOUT_MS } from "./timeouts";
 
 export interface AnalyzeScreenshotInput {
   screenshotPath: string;
@@ -15,6 +16,7 @@ export interface CaseYamlAssistInput {
   currentYaml: string;
   instruction?: string;
   validationIssues?: Array<{ path: string; message: string }>;
+  files?: AiMaterialFileInput[];
 }
 
 export interface AiMaterialFileInput {
@@ -45,7 +47,9 @@ export function analyzeScreenshot(input: AnalyzeScreenshotInput): Promise<string
 }
 
 export function generateMaterialCaseDraft(input: MaterialCaseDraftInput): Promise<MaterialCaseDraftResult> {
-  return request.post<unknown, MaterialCaseDraftResult>("/ai/cases/material-draft", input);
+  return request.post<unknown, MaterialCaseDraftResult>("/ai/cases/material-draft", input, {
+    timeout: AI_MATERIAL_DRAFT_TIMEOUT_MS
+  });
 }
 
 export async function analyzeScreenshotStream(

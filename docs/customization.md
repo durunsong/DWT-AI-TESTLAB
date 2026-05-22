@@ -45,6 +45,8 @@ pnpm dev
 - `context.routeGroups`：从路由菜单里提取业务分组的关键词。
 - `uploads.contextBodyLimitMb`：路由上下文导入接口的请求体大小限制。
 - `uploads.materialFileMaxMb`：AI 资料导入的单文件大小限制。
+- `uploads.caseAttachmentMaxMb`：用例编辑页上传测试附件的单文件大小限制。
+- `uploads.caseAttachmentBaseDir`：用例测试附件保存目录，必须位于项目根目录内，默认 `uploads/cases`。
 - `uploads.materialSourceMaxChars` / `uploads.materialLinkMaxChars`：AI 资料文本截断长度。
 
 ### .env
@@ -68,7 +70,7 @@ pnpm dev
 
 - 本地运行产物默认在 `logs/`、`reports/`、`screenshots/`、`traces/`。
 - 产物目录可通过 `platform.config.json` 的 `artifacts` 改为其他项目根目录内的相对路径。
-- 上传资料和路由上下文默认在 `uploads/`。
+- 上传资料、用例附件和路由上下文默认在 `uploads/`。
 - 业务上下文默认写入 `uploads/app-context/`。
 
 ## 交付前检查

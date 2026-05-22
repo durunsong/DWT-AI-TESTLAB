@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { preflightScenarioContent, ScenarioOrchestrator, validateScenarioContent } from "@ai-e2e/runner";
+import { defaultPlatformConfig, megabytesToBytes, preflightScenarioContent, ScenarioOrchestrator, type PlatformConfig, validateScenarioContent, validateScenarioContentForRun } from "@ai-e2e/runner";
 import YAML from "yaml";
 import type { EnvConfigService } from "./env-config.service";
 import { normalizeTestEnv } from "./env-config.service";
@@ -26,11 +26,47 @@ export interface CreateCaseInput {
   template: CaseTemplate;
 }
 
+export interface SaveCaseAttachmentInput {
+  caseId: string;
+  fileName: string;
+  mimeType?: string;
+  base64: string;
+}
+
+export interface SaveCaseAttachmentResult {
+  name: string;
+  file: string;
+  sizeBytes: number;
+}
+
+export interface DeleteCaseOptions {
+  deleteAttachments?: boolean;
+}
+
+export interface DeleteAttachmentResult {
+  deleted: boolean;
+  file: string;
+}
+
+export interface SearchCaseAttachmentsInput {
+  caseId?: string;
+  query?: string;
+  limit?: number;
+}
+
+export interface CaseAttachmentSearchResult {
+  kind: "file" | "directory";
+  name: string;
+  file: string;
+  sizeBytes?: number;
+}
+
 export class CaseService {
   constructor(
     _runner: ScenarioOrchestrator,
     private readonly rootDir: string,
-    private readonly envConfigService?: EnvConfigService
+    private readonly envConfigService?: EnvConfigService,
+    private readonly platformConfig: PlatformConfig = defaultPlatformConfig
   ) {}
 
   async listCases() {
@@ -38,7 +74,7 @@ export class CaseService {
     const cases = await Promise.all(
       files.map(async (filePath) => {
         const content = await fs.readFile(filePath, "utf8");
-        const validation = validateScenarioContent(content);
+        const validation = await this.validateScenarioContentForRun(content);
         const fallbackCaseId = this.caseIdFromFilePath(filePath);
         const parsed = validation.data;
 
@@ -60,7 +96,7 @@ export class CaseService {
   async getCase(caseId: string) {
     const filePath = await this.findScenarioPath(caseId);
     const content = await fs.readFile(filePath, "utf8");
-    const validation = validateScenarioContent(content);
+    const validation = await this.validateScenarioContentForRun(content);
     const parsed = validation.data;
 
     return {
@@ -100,7 +136,7 @@ export class CaseService {
 
     for (const filePath of files) {
       const content = await fs.readFile(filePath, "utf8");
-      const validation = validateScenarioContent(content);
+      const validation = await this.validateScenarioContentForRun(content);
       if (validation.caseId === caseId) {
         throw new Error(`case_id 已存在：${caseId}`);
       }
@@ -112,12 +148,12 @@ export class CaseService {
       description: input.description?.trim(),
       template: input.template
     });
-    const validation = this.validateContent(content);
+    const validation = await this.validateContentForRun(content);
     if (!validation.valid) {
       throw new Error(`新建用例模板校验失败：${validation.issues.map((item) => `${item.path} ${item.message}`).join("; ")}`);
     }
 
-    const parsed = validateScenarioContent(content).data;
+    const parsed = (await this.validateScenarioContentForRun(content)).data;
     await fs.writeFile(targetPath, content, "utf8");
     return {
       caseId,
@@ -133,7 +169,7 @@ export class CaseService {
   }
 
   async createCaseFromYaml(content: string, expectedCaseId?: string) {
-    const validation = this.validateContent(content);
+    const validation = await this.validateContentForRun(content);
     if (!validation.valid || !validation.caseId || !validation.caseName) {
       return { saved: false, validation };
     }
@@ -172,7 +208,7 @@ export class CaseService {
     }
     await this.assertCaseNameAvailable(validation.caseName, files);
     for (const filePath of files) {
-      const existing = validateScenarioContent(await fs.readFile(filePath, "utf8"));
+      const existing = await this.validateScenarioContentForRun(await fs.readFile(filePath, "utf8"));
       if (existing.caseId === caseId) {
         throw new Error(`case_id 已存在：${caseId}`);
       }
@@ -184,7 +220,7 @@ export class CaseService {
     }
 
     await fs.writeFile(targetPath, this.normalizeContent(content), "utf8");
-    const parsed = validateScenarioContent(content).data;
+    const parsed = (await this.validateScenarioContentForRun(content)).data;
     return {
       saved: true,
       caseId,
@@ -209,7 +245,7 @@ export class CaseService {
   }
 
   async saveCase(caseId: string, content: string) {
-    const validation = this.validateContent(content);
+    const validation = await this.validateContentForRun(content);
     if (!validation.valid) {
       return { saved: false, validation };
     }
@@ -242,7 +278,7 @@ export class CaseService {
         if (existingPath === filePath) {
           continue;
         }
-        const existing = validateScenarioContent(await fs.readFile(existingPath, "utf8"));
+        const existing = await this.validateScenarioContentForRun(await fs.readFile(existingPath, "utf8"));
         if (this.caseIdFromFilePath(existingPath) === nextCaseId || existing.caseId === nextCaseId) {
           throw new Error(`case_id 已存在：${nextCaseId}`);
         }
@@ -260,7 +296,7 @@ export class CaseService {
     };
   }
 
-  async deleteCase(caseId: string) {
+  async deleteCase(caseId: string, options: DeleteCaseOptions = {}) {
     const filePath = await this.findScenarioPath(caseId);
     const scenarioDir = this.scenarioDir();
     const resolvedFilePath = path.resolve(filePath);
@@ -269,16 +305,110 @@ export class CaseService {
     }
 
     const content = await fs.readFile(resolvedFilePath, "utf8");
-    const validation = validateScenarioContent(content);
+    const validation = await this.validateScenarioContentForRun(content);
     const deletedCaseId = validation.caseId ?? this.caseIdFromFilePath(resolvedFilePath);
     const file = path.relative(this.rootDir, resolvedFilePath).replace(/\\/g, "/");
 
     await fs.unlink(resolvedFilePath);
+    const attachmentsDir = this.relativePath(this.attachmentCaseDir(deletedCaseId));
+    let attachmentsDeleted = false;
+    if (options.deleteAttachments) {
+      attachmentsDeleted = await this.deleteAttachmentDirectory(deletedCaseId);
+    }
+
     return {
       deleted: true,
       caseId: deletedCaseId,
-      file
+      file,
+      attachmentsDeleted,
+      attachmentsDir
     };
+  }
+
+  async saveAttachment(input: SaveCaseAttachmentInput): Promise<SaveCaseAttachmentResult> {
+    const caseId = this.normalizeAttachmentCaseId(input.caseId);
+    const fileName = this.safeAttachmentFileName(input.fileName);
+    const buffer = Buffer.from(input.base64, "base64");
+    if (!buffer.byteLength) {
+      throw new Error("附件内容不能为空");
+    }
+
+    const maxBytes = megabytesToBytes(this.platformConfig.uploads.caseAttachmentMaxMb);
+    if (buffer.byteLength > maxBytes) {
+      throw new Error(`${input.fileName} 超过 ${this.platformConfig.uploads.caseAttachmentMaxMb}MB，请压缩或拆分后再上传`);
+    }
+
+    const baseDir = path.resolve(this.rootDir, this.platformConfig.uploads.caseAttachmentBaseDir);
+    this.assertInsideRoot(baseDir, "附件目录必须位于项目根目录内");
+    const caseDir = path.resolve(baseDir, caseId);
+    this.assertInside(caseDir, baseDir, "附件用例目录非法");
+    await fs.mkdir(caseDir, { recursive: true });
+
+    const targetPath = await this.nextAvailableAttachmentPath(caseDir, fileName);
+    await fs.writeFile(targetPath, buffer);
+
+    return {
+      name: path.basename(targetPath),
+      file: path.relative(this.rootDir, targetPath).replace(/\\/g, "/"),
+      sizeBytes: buffer.byteLength
+    };
+  }
+
+  async listAttachments(caseId: string): Promise<SaveCaseAttachmentResult[]> {
+    const normalizedCaseId = this.normalizeAttachmentCaseId(caseId);
+    const baseDir = path.resolve(this.rootDir, this.platformConfig.uploads.caseAttachmentBaseDir);
+    this.assertInsideRoot(baseDir, "附件目录必须位于项目根目录内");
+    const caseDir = path.resolve(baseDir, normalizedCaseId);
+    this.assertInside(caseDir, baseDir, "附件用例目录非法");
+
+    const entries = await fs.readdir(caseDir, { withFileTypes: true }).catch((error: unknown) => {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    });
+    const files = await Promise.all(
+      entries
+        .filter((entry) => entry.isFile())
+        .map(async (entry) => {
+          const filePath = path.resolve(caseDir, entry.name);
+          this.assertInside(filePath, caseDir, "附件文件路径非法");
+          const stat = await fs.stat(filePath);
+          return {
+            name: entry.name,
+            file: path.relative(this.rootDir, filePath).replace(/\\/g, "/"),
+            sizeBytes: stat.size
+          };
+        })
+    );
+
+    return files.sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  async deleteAttachment(caseId: string, file: string): Promise<DeleteAttachmentResult> {
+    const caseDir = this.attachmentCaseDir(caseId);
+    const filePath = path.resolve(this.rootDir, file);
+    this.assertInside(filePath, caseDir, "附件文件路径非法");
+    await fs.unlink(filePath);
+    return {
+      deleted: true,
+      file: this.relativePath(filePath)
+    };
+  }
+
+  async searchAttachments(input: SearchCaseAttachmentsInput = {}): Promise<CaseAttachmentSearchResult[]> {
+    const query = (input.query ?? "").trim().toLowerCase();
+    const limit = Math.max(1, Math.min(input.limit ?? 200, 500));
+    const baseDir = input.caseId ? this.attachmentCaseDir(input.caseId) : this.attachmentBaseDir();
+    const results: CaseAttachmentSearchResult[] = [];
+
+    await this.walkAttachmentEntries(baseDir, query, results, limit);
+    return results.sort((left, right) => {
+      if (left.kind !== right.kind) {
+        return left.kind === "directory" ? -1 : 1;
+      }
+      return left.file.localeCompare(right.file);
+    });
   }
 
   validateContent(content: string): CaseValidationResult {
@@ -296,6 +426,27 @@ export class CaseService {
         issues: [{ path: "yaml", message: error instanceof Error ? error.message : String(error) }]
       };
     }
+  }
+
+  async validateContentForRun(content: string): Promise<CaseValidationResult> {
+    try {
+      const result = await this.validateScenarioContentForRun(content);
+      return {
+        valid: result.valid,
+        caseId: result.caseId,
+        caseName: result.caseName,
+        issues: result.issues
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        issues: [{ path: "yaml", message: error instanceof Error ? error.message : String(error) }]
+      };
+    }
+  }
+
+  private async validateScenarioContentForRun(content: string) {
+    return validateScenarioContentForRun(this.rootDir, content);
   }
 
   async preflightCase(caseId: string, env = process.env.TEST_ENV ?? "local") {
@@ -323,7 +474,7 @@ export class CaseService {
     const files = await this.listScenarioFiles();
     for (const filePath of files) {
       const content = await fs.readFile(filePath, "utf8");
-      const parsed = validateScenarioContent(content);
+      const parsed = await this.validateScenarioContentForRun(content);
       const candidateCaseId = parsed.caseId ?? this.caseIdFromFilePath(filePath);
       if (candidateCaseId === caseId) {
         return filePath;
@@ -334,6 +485,117 @@ export class CaseService {
 
   private scenarioDir(): string {
     return path.resolve(this.rootDir, "cases", "scenario");
+  }
+
+  private attachmentBaseDir(): string {
+    const baseDir = path.resolve(this.rootDir, this.platformConfig.uploads.caseAttachmentBaseDir);
+    this.assertInsideRoot(baseDir, "附件目录必须位于项目根目录内");
+    return baseDir;
+  }
+
+  private attachmentCaseDir(caseId: string): string {
+    const baseDir = this.attachmentBaseDir();
+    const normalizedCaseId = this.normalizeAttachmentCaseId(caseId);
+    const caseDir = path.resolve(baseDir, normalizedCaseId);
+    this.assertInside(caseDir, baseDir, "附件用例目录非法");
+    return caseDir;
+  }
+
+  private async deleteAttachmentDirectory(caseId: string): Promise<boolean> {
+    const caseDir = this.attachmentCaseDir(caseId);
+    const exists = await fs.stat(caseDir).then((stat) => stat.isDirectory()).catch(() => false);
+    if (!exists) {
+      return false;
+    }
+    await fs.rm(caseDir, { recursive: true, force: true });
+    return true;
+  }
+
+  private async walkAttachmentEntries(
+    currentDir: string,
+    query: string,
+    results: CaseAttachmentSearchResult[],
+    limit: number
+  ): Promise<void> {
+    if (results.length >= limit) {
+      return;
+    }
+    const entries = await fs.readdir(currentDir, { withFileTypes: true }).catch((error: unknown) => {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    });
+
+    for (const entry of entries) {
+      if (results.length >= limit) {
+        return;
+      }
+      const entryPath = path.resolve(currentDir, entry.name);
+      this.assertInside(entryPath, this.attachmentBaseDir(), "附件搜索路径非法");
+      const relativePath = this.relativePath(entryPath);
+      const matches = !query || entry.name.toLowerCase().includes(query) || relativePath.toLowerCase().includes(query);
+      if (entry.isDirectory()) {
+        if (matches) {
+          results.push({ kind: "directory", name: entry.name, file: relativePath });
+        }
+        await this.walkAttachmentEntries(entryPath, query, results, limit);
+      } else if (entry.isFile() && matches) {
+        const stat = await fs.stat(entryPath);
+        results.push({ kind: "file", name: entry.name, file: relativePath, sizeBytes: stat.size });
+      }
+    }
+  }
+
+  private relativePath(filePath: string): string {
+    return path.relative(this.rootDir, filePath).replace(/\\/g, "/");
+  }
+
+  private normalizeAttachmentCaseId(value: string): string {
+    const normalized = this.normalizeCaseId(value).replace(/[^a-z0-9_-]/g, "_").replace(/^_+|_+$/g, "");
+    return normalized || "_draft";
+  }
+
+  private safeAttachmentFileName(value: string): string {
+    const baseName = path.basename(value.replace(/\\/g, "/"));
+    const parsed = path.parse(baseName);
+    const stem = parsed.name
+      .normalize("NFKC")
+      .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_")
+      .replace(/\s+/g, "_")
+      .replace(/^\.+|\.+$/g, "")
+      .slice(0, 96);
+    const ext = parsed.ext
+      .normalize("NFKC")
+      .replace(/[^.\p{L}\p{N}_-]/gu, "")
+      .slice(0, 24);
+    return `${stem || "attachment"}${ext || ".bin"}`;
+  }
+
+  private async nextAvailableAttachmentPath(caseDir: string, fileName: string): Promise<string> {
+    const parsed = path.parse(fileName);
+    for (let index = 0; index < 1000; index += 1) {
+      const suffix = index === 0 ? "" : `-${index + 1}`;
+      const candidate = path.resolve(caseDir, `${parsed.name}${suffix}${parsed.ext}`);
+      this.assertInside(candidate, caseDir, "附件文件路径非法");
+      const exists = await fs.stat(candidate).then(() => true).catch(() => false);
+      if (!exists) {
+        return candidate;
+      }
+    }
+    throw new Error(`附件重名过多：${fileName}`);
+  }
+
+  private assertInsideRoot(targetPath: string, message: string): void {
+    this.assertInside(targetPath, path.resolve(this.rootDir), message);
+  }
+
+  private assertInside(targetPath: string, parentDir: string, message: string): void {
+    const target = path.resolve(targetPath);
+    const parent = path.resolve(parentDir);
+    if (target !== parent && !target.startsWith(parent + path.sep)) {
+      throw new Error(message);
+    }
   }
 
   private async listScenarioFiles(): Promise<string[]> {
@@ -352,7 +614,7 @@ export class CaseService {
     }
     for (const filePath of files) {
       const content = await fs.readFile(filePath, "utf8");
-      const validation = validateScenarioContent(content);
+      const validation = await this.validateScenarioContentForRun(content);
       const existingCaseId = validation.caseId ?? this.caseIdFromFilePath(filePath);
       if (excludeCaseId && existingCaseId === excludeCaseId) {
         continue;
@@ -386,7 +648,7 @@ export class CaseService {
       const sessions = this.normalizeAiSessions(scenario.sessions);
       let steps = this.normalizeAiSteps(scenario.steps, sessions);
       let variables = this.normalizeAiVariables(scenario.variables, steps);
-      steps = this.normalizeAiStepSafety(this.ensureLoginOpenSteps(steps), variables);
+      steps = this.normalizeAiStepSafety(this.ensureLoginOpenSteps(steps), variables, sessions);
       steps = this.normalizeAdminPerinfoStepsIfNeeded(scenario, steps, sessions);
       variables = this.normalizeAiVariables(variables, steps);
 
@@ -439,7 +701,7 @@ export class CaseService {
     const defaults = this.isRecord(value) ? value : {};
     const rawTimeout = Number(defaults.step_timeout_ms ?? defaults.timeout_ms ?? defaults.timeoutMs);
     return {
-      step_timeout_ms: Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.floor(rawTimeout) : 60_000,
+      step_timeout_ms: Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.floor(rawTimeout) : 20_000,
       wait_for_network: typeof defaults.wait_for_network === "boolean" ? defaults.wait_for_network : true
     };
   }
@@ -463,12 +725,17 @@ export class CaseService {
       normalized.step_id = this.normalizeStepId(stepId, index);
       normalized.name = name;
       normalized.type = this.normalizeStepType(normalized.type, normalized.action, normalized.name);
-      normalized.session = session;
-      normalized.target = this.stringValue(normalized.target)
+      const normalizedSession = this.normalizeAiStepSession(normalized.type, session, sessions);
+      if (normalizedSession) {
+        normalized.session = normalizedSession;
+      } else {
+        delete normalized.session;
+      }
+      normalized.target = this.normalizeAiTarget(this.stringValue(normalized.target)
         || this.stringValue(normalized.locator)
         || this.stringValue(normalized.selector)
         || this.stringValue(normalized.element)
-        || undefined;
+        || undefined);
       normalized.file = this.stringValue(normalized.file)
         || this.stringValue(normalized.file_path)
         || this.stringValue(normalized.filePath)
@@ -479,7 +746,12 @@ export class CaseService {
         || undefined;
       normalized.expected = expectedText || (this.isRecord(normalized.expected) ? normalized.expected : undefined);
       normalized.url = this.normalizeAiUrl(this.stringValue(normalized.url) || this.stringValue(normalized.href) || this.stringValue(normalized.path));
-      normalized.value = this.stringValue(normalized.value) || undefined;
+      normalized.value = this.stringValue(normalized.value)
+        || (normalized.type === "web_input" ? this.stringValue(normalized.text) : "")
+        || undefined;
+      if (normalized.type === "web_input") {
+        delete normalized.text;
+      }
 
       if (normalized.type === "flow_login") {
         normalized.username = this.stringValue(normalized.username) || "${session.username}";
@@ -512,9 +784,19 @@ export class CaseService {
     return variables;
   }
 
-  private normalizeAiStepSafety(steps: Array<Record<string, unknown>>, variables: Record<string, string>): Array<Record<string, unknown>> {
+  private normalizeAiStepSafety(
+    steps: Array<Record<string, unknown>>,
+    variables: Record<string, string>,
+    sessions: Array<Record<string, unknown>>
+  ): Array<Record<string, unknown>> {
     return steps
       .filter((step) => {
+        if (step.type === "db_clean") {
+          return false;
+        }
+        if (this.isDbStepType(step.type)) {
+          return !this.isUnsafeGeneratedDbStep(step, sessions);
+        }
         if (step.type !== "web_upload") {
           return true;
         }
@@ -528,11 +810,79 @@ export class CaseService {
       })
       .map((step) => {
         const normalized = { ...step };
+        if (this.isDbStepType(normalized.type)) {
+          delete normalized.session;
+        }
         if (normalized.type === "web_assert_text" && !this.stringValue(normalized.target) && this.stringValue(normalized.expected)) {
           normalized.target = this.stringValue(normalized.expected);
         }
         return normalized;
       });
+  }
+
+  private normalizeAiStepSession(type: unknown, session: "user" | "admin", sessions: Array<Record<string, unknown>>): "user" | "admin" | undefined {
+    if (this.isDbStepType(type)) {
+      return undefined;
+    }
+    const names = new Set(sessions.map((item) => this.sessionName(item.name)));
+    if (names.has(session)) {
+      return session;
+    }
+    return this.sessionName(sessions[0]?.name);
+  }
+
+  private isDbStepType(type: unknown): boolean {
+    return type === "db_query" || type === "db_assert";
+  }
+
+  private isUnsafeGeneratedDbStep(step: Record<string, unknown>, sessions: Array<Record<string, unknown>>): boolean {
+    const sql = this.stringValue(step.sql);
+    if (!/^\s*(select|show|desc|describe|explain)\b/i.test(sql)) {
+      return true;
+    }
+    if (step.type === "db_assert" && !this.hasExpectedValue(step.expected)) {
+      return true;
+    }
+
+    const allowedEnvRefs = this.allowedSessionEnvRefs(sessions);
+    return this.collectEnvRefs(step).some((envName) => !allowedEnvRefs.has(envName));
+  }
+
+  private hasExpectedValue(value: unknown): boolean {
+    if (typeof value === "string") {
+      return value.trim().length > 0;
+    }
+    if (this.isRecord(value)) {
+      return Object.keys(value).length > 0;
+    }
+    return typeof value === "number" || typeof value === "boolean";
+  }
+
+  private allowedSessionEnvRefs(sessions: Array<Record<string, unknown>>): Set<string> {
+    return new Set(sessions.flatMap((session) => this.collectEnvRefs(session)));
+  }
+
+  private collectEnvRefs(value: unknown): string[] {
+    if (typeof value === "string") {
+      return [...value.matchAll(/\$\{env\.([^}]+)\}/g)]
+        .map((match) => (match[1] ?? "").trim())
+        .filter(Boolean);
+    }
+    if (Array.isArray(value)) {
+      return value.flatMap((item) => this.collectEnvRefs(item));
+    }
+    if (this.isRecord(value)) {
+      return Object.values(value).flatMap((item) => this.collectEnvRefs(item));
+    }
+    return [];
+  }
+
+  private normalizeAiTarget(value: string | undefined): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+    const locationRef = value.match(/^\$\{loc\.([A-Za-z0-9_-]+)\}$/);
+    return locationRef?.[1] || value;
   }
 
   private normalizeAdminPerinfoStepsIfNeeded(
@@ -804,6 +1154,9 @@ export class CaseService {
       `case_name: ${this.quoteYaml(input.caseName)}`,
       `description: ${this.quoteYaml(description)}`,
       `mode: ${body.mode}`,
+      "defaults:",
+      "  step_timeout_ms: 20000",
+      "  wait_for_network: true",
       "sessions:",
       ...body.sessions,
       "locations:",
@@ -939,4 +1292,8 @@ export class CaseService {
   private quoteYaml(value: string): string {
     return JSON.stringify(value);
   }
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error !== null && typeof error === "object" && "code" in error;
 }

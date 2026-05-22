@@ -12,7 +12,7 @@
     "host": "0.0.0.0",
     "port": 4301,
     "devApiProxyTarget": "http://localhost:4300",
-    "requestTimeoutMs": 60000,
+    "requestTimeoutMs": 20000,
     "storageKey": "dwt-testing-settings"
   },
   "desktop": {
@@ -26,7 +26,8 @@
       "width": 1440,
       "height": 920,
       "minWidth": 1280,
-      "minHeight": 760
+      "minHeight": 760,
+      "menuBarVisible": false
     }
   },
   "workspace": {
@@ -54,6 +55,8 @@
   "uploads": {
     "contextBodyLimitMb": 5,
     "materialFileMaxMb": 8,
+    "caseAttachmentMaxMb": 20,
+    "caseAttachmentBaseDir": "uploads/cases",
     "materialSourceMaxChars": 18000,
     "materialLinkMaxChars": 24000
   }

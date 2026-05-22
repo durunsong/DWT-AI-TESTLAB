@@ -112,7 +112,7 @@ pnpm ci:check
 - `artifacts`：日志、报告、截图、trace 的本地目录。
 - `browser.defaultViewport`：Playwright 默认视口，仍可被 `BROWSER_VIEWPORT_WIDTH/HEIGHT` 覆盖。
 - `context`：设置页默认上下文来源和路由分组关键词。
-- `uploads`：上下文导入、AI 资料文件和文本截断限制。
+- `uploads`：上下文导入、AI 资料文件、用例附件目录/大小和文本截断限制。
 
 敏感配置仍然放在 `.env`，例如账号、密码、API token、DB 连接和 AI Key。
 
@@ -159,6 +159,22 @@ GET    /api/db/health
 ```
 
 上下文数据默认写入 `uploads/app-context/`，用于本地调试和 AI 辅助生成，不应进入交付包。默认来源和路由分组关键词可在 `platform.config.json` 的 `context.defaultSources`、`context.routeGroups` 中调整。
+
+## 用例附件
+
+YAML 中的 `web_upload.file` 使用项目相对路径。用例编辑页支持上传图片或任意格式附件，默认保存到 `uploads/cases/<caseId>/`，并可自动写入选中的 `web_upload` 步骤：
+
+```yaml
+steps:
+  - step_id: upload_license
+    name: 上传营业执照
+    type: web_upload
+    session: user
+    target: kyc_license_upload
+    file: uploads/cases/kyc_submit/business-license.png
+```
+
+`platform.config.json` 中的 `uploads.caseAttachmentBaseDir` 和 `uploads.caseAttachmentMaxMb` 可调整保存目录和单文件大小。运行前预检会检查附件路径和文件是否存在。
 
 ## 构建
 

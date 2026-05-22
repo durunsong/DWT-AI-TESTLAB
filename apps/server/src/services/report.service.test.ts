@@ -128,19 +128,26 @@ function defaultPlatformConfigForTest(): PlatformConfig {
   return {
     app: { brandName: "Test", productName: "Test" },
     server: { host: "127.0.0.1", port: 0, corsOrigins: ["*"] },
-    web: { host: "127.0.0.1", port: 0, devApiProxyTarget: "http://127.0.0.1:0", requestTimeoutMs: 60000, storageKey: "test-settings" },
+    web: { host: "127.0.0.1", port: 0, devApiProxyTarget: "http://127.0.0.1:0", requestTimeoutMs: 20000, storageKey: "test-settings" },
     desktop: {
       appId: "test",
       productName: "Test",
       maintainer: "Test",
       artifactName: "test.${ext}",
       apiPort: 0,
-      window: { title: "Test", width: 1440, height: 920, minWidth: 1280, minHeight: 760 }
+      window: { title: "Test", width: 1440, height: 920, minWidth: 1280, minHeight: 760, menuBarVisible: true }
     },
     workspace: { directories: ["cases"] },
     artifacts: { logsDir: "logs", reportsDir: "reports", screenshotsDir: "screenshots", tracesDir: "traces" },
     browser: { defaultViewport: { width: 1920, height: 1080 } },
     context: { defaultSources: ["user", "admin"], routeGroups: { enterpriseKeywords: [], approvalKeywords: [] } },
-    uploads: { contextBodyLimitMb: 5, materialFileMaxMb: 8, materialSourceMaxChars: 18000, materialLinkMaxChars: 24000 }
+    uploads: {
+      contextBodyLimitMb: 5,
+      materialFileMaxMb: 8,
+      caseAttachmentMaxMb: 20,
+      caseAttachmentBaseDir: "uploads/cases",
+      materialSourceMaxChars: 18000,
+      materialLinkMaxChars: 24000
+    }
   };
 }

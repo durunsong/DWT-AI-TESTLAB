@@ -1,15 +1,22 @@
-import { type ReactNode, useEffect, useState } from "react";
-import { Alert, Button, Card, Col, Drawer, Form, Input, Row, Segmented, Space, Spin, Tag, Typography, message } from "antd";
-import { ArrowLeftOutlined, CheckCircleOutlined, CopyOutlined, PlayCircleOutlined, RobotOutlined, SafetyCertificateOutlined, SaveOutlined } from "@ant-design/icons";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Alert, Button, Card, Checkbox, Col, Drawer, Form, Input, Modal, Row, Segmented, Select, Space, Spin, Tag, Typography, Upload, message } from "antd";
+import type { RcFile } from "antd/es/upload";
+import { ArrowLeftOutlined, CheckCircleOutlined, CopyOutlined, DeleteOutlined, EyeOutlined, FolderOpenOutlined, PaperClipOutlined, PlayCircleOutlined, RobotOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
-import { assistCaseYamlStream, type CaseYamlAssistMode } from "../../api/ai";
-import { getCase, preflightCaseContent, saveCase, validateCase } from "../../api/cases";
+import { assistCaseYamlStream, type AiMaterialFileInput, type CaseYamlAssistMode } from "../../api/ai";
+import { deleteCaseAttachment, getCase, listCaseAttachments, normalizeCaseYaml, preflightCaseContent, saveCase, searchCaseAttachments, uploadCaseAttachment, validateCase } from "../../api/cases";
 import { createTestRun } from "../../api/testRuns";
 import { PageHeader } from "../../components/PageHeader";
 import { YamlEditor } from "../../components/YamlEditor";
 import { useCaseStore } from "../../stores/useCaseStore";
 import { useSettingStore } from "../../stores/useSettingStore";
-import type { CasePreflightResult, CaseValidationResult } from "../../types/case";
+import type { CaseAttachmentResult, CaseAttachmentSearchResult, CasePreflightResult, CaseValidationResult } from "../../types/case";
+import { cn } from "../../utils/cn";
+import { appendInstructionBlock, buildAttachmentAiPrompt, buildAttachmentBatchAiPrompt, collectUploadSteps, filterNewAttachmentSearchResults, insertUploadStepBeforeSubmit, isImageAttachmentFile, upsertUploadStepFile, type AttachmentPromptFile, type UploadStepOption } from "./attachment-prompt";
+import { caseEditorDropCopy, hasFileDrag, resolveCaseEditorDropTarget, type CaseEditorDropTarget } from "./drag-upload";
+
+const attachmentUploadMaxMb = Number(import.meta.env.VITE_APP_CASE_ATTACHMENT_MAX_MB || 20);
+const aiMaterialUploadMaxMb = Number(import.meta.env.VITE_APP_UPLOAD_MAX_MB || 8);
 
 const aiModeOptions: Array<{ label: string; value: CaseYamlAssistMode }> = [
   { label: "AI 写", value: "write" },
@@ -31,6 +38,15 @@ interface CaseMetaFormValues {
   description?: string;
 }
 
+interface AiInstructionAttachmentItem {
+  uid: string;
+  name: string;
+  mimeType?: string;
+  base64: string;
+  sizeBytes: number;
+  previewUrl?: string;
+}
+
 export default function CaseEditor() {
   const { caseId = "" } = useParams();
   const navigate = useNavigate();
@@ -49,18 +65,108 @@ export default function CaseEditor() {
   const [aiStreaming, setAiStreaming] = useState(false);
   const [aiValidation, setAiValidation] = useState<CaseValidationResult>();
   const [aiError, setAiError] = useState("");
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const [aiInstructionUploading, setAiInstructionUploading] = useState(false);
+  const [attachments, setAttachments] = useState<CaseAttachmentResult[]>([]);
+  const [promptAttachment, setPromptAttachment] = useState<CaseAttachmentResult>();
+  const [promptFiles, setPromptFiles] = useState<AttachmentPromptFile[]>([]);
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [attachmentQuery, setAttachmentQuery] = useState("");
+  const [attachmentSearching, setAttachmentSearching] = useState(false);
+  const [attachmentSearchResults, setAttachmentSearchResults] = useState<CaseAttachmentSearchResult[]>([]);
+  const [selectedPromptFiles, setSelectedPromptFiles] = useState<Record<string, AttachmentPromptFile>>({});
+  const [aiInstructionAttachments, setAiInstructionAttachments] = useState<AiInstructionAttachmentItem[]>([]);
+  const [previewAttachment, setPreviewAttachment] = useState<AiInstructionAttachmentItem>();
+  const [pageDropTarget, setPageDropTarget] = useState<CaseEditorDropTarget>();
+  const dragDepthRef = useRef(0);
+  const uploadSteps = collectUploadSteps(yaml);
+  const selectedPromptFileList = Object.values(selectedPromptFiles);
+  const visibleAttachments = attachments.filter((item) => attachmentMatches(item, attachmentQuery));
+  const visibleSearchResults = filterNewAttachmentSearchResults(attachmentSearchResults, attachments);
+  const [selectedUploadStepId, setSelectedUploadStepId] = useState<string>();
+  const effectiveUploadStepId = selectedUploadStepId && uploadSteps.some((step) => step.stepId === selectedUploadStepId)
+    ? selectedUploadStepId
+    : uploadSteps[0]?.stepId;
+  const dropCopy = pageDropTarget ? caseEditorDropCopy(pageDropTarget) : undefined;
 
   useEffect(() => {
     if (!caseId) return;
     setLoading(true);
-    getCase(caseId)
-      .then((detail) => {
+    Promise.all([getCase(caseId), listCaseAttachments(caseId)])
+      .then(([detail, caseAttachments]) => {
         setActiveCase(detail);
         setValidation(detail.validation);
+        setAttachments(caseAttachments);
       })
       .catch((error) => messageApi.error(error instanceof Error ? error.message : String(error)))
       .finally(() => setLoading(false));
   }, [caseId, messageApi, setActiveCase, setValidation]);
+
+  useEffect(() => {
+    const target = resolveCaseEditorDropTarget({ aiOpen, attachmentUploading, aiInstructionUploading });
+
+    const resetDragState = () => {
+      dragDepthRef.current = 0;
+      setPageDropTarget(undefined);
+    };
+
+    const markDragState = (event: DragEvent) => {
+      if (!hasFileDrag(event.dataTransfer?.types)) {
+        return false;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = target ? "copy" : "none";
+      }
+      setPageDropTarget(target);
+      return true;
+    };
+
+    const handleDragEnter = (event: DragEvent) => {
+      if (!markDragState(event)) return;
+      dragDepthRef.current += 1;
+    };
+
+    const handleDragOver = (event: DragEvent) => {
+      markDragState(event);
+    };
+
+    const handleDragLeave = (event: DragEvent) => {
+      if (!hasFileDrag(event.dataTransfer?.types)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+      if (dragDepthRef.current === 0) {
+        setPageDropTarget(undefined);
+      }
+    };
+
+    const handleDrop = (event: DragEvent) => {
+      if (!hasFileDrag(event.dataTransfer?.types)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      resetDragState();
+      if (!target || !files.length) {
+        return;
+      }
+
+      void uploadDroppedFiles(target, files);
+    };
+
+    document.addEventListener("dragenter", handleDragEnter);
+    document.addEventListener("dragover", handleDragOver);
+    document.addEventListener("dragleave", handleDragLeave);
+    document.addEventListener("drop", handleDrop);
+    return () => {
+      document.removeEventListener("dragenter", handleDragEnter);
+      document.removeEventListener("dragover", handleDragOver);
+      document.removeEventListener("dragleave", handleDragLeave);
+      document.removeEventListener("drop", handleDrop);
+    };
+  }, [activeCase?.caseId, aiOpen, aiInstructionUploading, attachmentUploading, caseId]);
 
   async function handleValidate() {
     try {
@@ -173,7 +279,8 @@ export default function CaseEditor() {
           caseId,
           currentYaml: yaml,
           instruction: aiInstruction,
-          validationIssues: validation?.issues
+          validationIssues: validation?.issues,
+          files: aiInstructionAttachments.map(aiInstructionAttachmentToFile)
         },
         {
           onChunk: (chunk) => {
@@ -187,7 +294,7 @@ export default function CaseEditor() {
       );
       if (streamError) throw streamError;
 
-      const normalized = normalizeAiYaml(nextDraft);
+      const normalized = await normalizeCaseYaml(normalizeAiYaml(nextDraft));
       setAiDraft(normalized);
       const result = await validateCase(normalized);
       setAiValidation(result);
@@ -206,7 +313,7 @@ export default function CaseEditor() {
   }
 
   async function handleApplyAiDraft() {
-    const normalized = normalizeAiYaml(aiDraft);
+    const normalized = await normalizeCaseYaml(normalizeAiYaml(aiDraft));
     if (!normalized) return;
     const result = aiValidation ?? await validateCase(normalized);
     if (!result.valid) {
@@ -222,8 +329,210 @@ export default function CaseEditor() {
 
   async function copyAiDraft() {
     if (!aiDraft) return;
-    await navigator.clipboard.writeText(normalizeAiYaml(aiDraft));
+    await navigator.clipboard.writeText(await normalizeCaseYaml(normalizeAiYaml(aiDraft)));
     messageApi.success("AI YAML 已复制");
+  }
+
+  async function handleAttachmentBeforeUpload(file: RcFile) {
+    const maxBytes = attachmentUploadMaxMb * 1024 * 1024;
+    if (file.size > maxBytes) {
+      messageApi.error(`${file.name} 超过 ${attachmentUploadMaxMb}MB，请压缩或拆分后再上传`);
+      return Upload.LIST_IGNORE;
+    }
+
+    setAttachmentUploading(true);
+    try {
+      const result = await uploadCaseAttachment({
+        caseId: normalizeCaseId(caseId || activeCase?.caseId || "_draft"),
+        fileName: file.name,
+        mimeType: file.type,
+        base64: await readFileAsBase64(file)
+      });
+      setAttachments((items) => [result, ...items.filter((item) => item.file !== result.file)]);
+      setSelectedPromptFiles((current) => ({ ...current, [result.file]: attachmentToPromptFile(result) }));
+      messageApi.success("已上传附件，可引用到步骤或生成提示词");
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAttachmentUploading(false);
+    }
+    return Upload.LIST_IGNORE;
+  }
+
+  async function handleAiInstructionAttachmentBeforeUpload(file: RcFile) {
+    const maxBytes = aiMaterialUploadMaxMb * 1024 * 1024;
+    if (file.size > maxBytes) {
+      messageApi.error(`${file.name} 超过 ${aiMaterialUploadMaxMb}MB，请压缩或拆分后再上传`);
+      return Upload.LIST_IGNORE;
+    }
+
+    setAiInstructionUploading(true);
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      const attachment: AiInstructionAttachmentItem = {
+        uid: `${file.uid}-${Date.now()}`,
+        name: file.name,
+        mimeType: file.type,
+        base64: dataUrlToBase64(dataUrl),
+        sizeBytes: file.size,
+        previewUrl: isImageAttachmentFile({ name: file.name, file: file.name, mimeType: file.type }) ? dataUrl : undefined
+      };
+      setAiInstructionAttachments((items) => [attachment, ...items]);
+      messageApi.success("已加入本次 AI 对话资料，不会保存为用例附件");
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAiInstructionUploading(false);
+    }
+    return Upload.LIST_IGNORE;
+  }
+
+  async function uploadDroppedFiles(target: CaseEditorDropTarget, files: File[]) {
+    for (const [index, file] of files.entries()) {
+      const uploadFile = toRcFile(file, index);
+      if (target === "aiInstruction") {
+        await handleAiInstructionAttachmentBeforeUpload(uploadFile);
+      } else {
+        await handleAttachmentBeforeUpload(uploadFile);
+      }
+    }
+  }
+
+  function removeAiInstructionAttachment(uid: string) {
+    setAiInstructionAttachments((items) => items.filter((item) => item.uid !== uid));
+  }
+
+  async function copyAttachmentPath(file: string) {
+    await navigator.clipboard.writeText(file);
+    messageApi.success("附件路径已复制");
+  }
+
+  async function deleteAttachment(file: string) {
+    Modal.confirm({
+      title: "删除附件",
+      content: (
+        <Space orientation="vertical" size={8}>
+          <Typography.Text>确定删除这个附件/图片吗？</Typography.Text>
+          <Typography.Text code>{file}</Typography.Text>
+          {yaml.includes(file) ? <Alert type="warning" showIcon title="当前 YAML 已引用该路径，删除后运行前预检会报文件缺失。" /> : null}
+        </Space>
+      ),
+      okText: "删除",
+      cancelText: "取消",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await deleteCaseAttachment(caseId || activeCase?.caseId || "_draft", file);
+        setAttachments((items) => items.filter((item) => item.file !== file));
+        setAttachmentSearchResults((items) => items.filter((item) => item.file !== file));
+        setSelectedPromptFiles((current) => {
+          const next = { ...current };
+          delete next[file];
+          return next;
+        });
+        messageApi.success("附件已删除");
+      }
+    });
+  }
+
+  async function handleSearchAttachments() {
+    setAttachmentSearching(true);
+    try {
+      const result = await searchCaseAttachments({
+        caseId: caseId || activeCase?.caseId || "_draft",
+        query: attachmentQuery,
+        limit: 200
+      });
+      setAttachmentSearchResults(result);
+      messageApi.success(`找到 ${result.length} 个文件/文件夹`);
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAttachmentSearching(false);
+    }
+  }
+
+  function applyAttachment(file: string) {
+    if (!effectiveUploadStepId) {
+      if (/^admin_/i.test(caseId || activeCase?.caseId || "") && isImageAttachmentFile({ file })) {
+        setYaml(insertUploadStepBeforeSubmit(yaml, {
+          stepId: "upload_avatar",
+          name: "上传头像",
+          session: "admin",
+          target: "admin_avatar_upload",
+          file,
+          beforeTarget: "admin_profile_save"
+        }));
+        messageApi.success("已新增 upload_avatar 并引用附件");
+        return;
+      }
+      messageApi.warning("当前 YAML 中没有 web_upload 步骤，请先新增上传步骤或使用 AI 优化");
+      return;
+    }
+    setYaml(upsertUploadStepFile(yaml, effectiveUploadStepId, file));
+    messageApi.success(`已引用到 ${effectiveUploadStepId}`);
+  }
+
+  function togglePromptFile(file: AttachmentPromptFile, checked: boolean) {
+    setSelectedPromptFiles((current) => {
+      const next = { ...current };
+      if (checked) {
+        next[file.file] = file;
+      } else {
+        delete next[file.file];
+      }
+      return next;
+    });
+  }
+
+  function openAttachmentPrompt(attachment?: CaseAttachmentResult) {
+    const files = selectedPromptFileList.length
+      ? selectedPromptFileList
+      : attachment
+        ? [attachmentToPromptFile(attachment)]
+        : attachments.map(attachmentToPromptFile);
+    setPromptAttachment(attachment);
+    setPromptFiles(files);
+    setPromptOpen(true);
+  }
+
+  function selectedUploadStep(): UploadStepOption | undefined {
+    return uploadSteps.find((step) => step.stepId === effectiveUploadStepId);
+  }
+
+  function currentAttachmentPrompt(): string {
+    if (promptFiles.length > 1) {
+      return buildAttachmentBatchAiPrompt({
+        caseId: caseId || activeCase?.caseId || "_draft",
+        files: promptFiles,
+        steps: uploadSteps
+      });
+    }
+    const file = promptFiles[0]?.file || promptAttachment?.file;
+    if (!file) {
+      return "";
+    }
+    return buildAttachmentAiPrompt({
+      caseId: caseId || activeCase?.caseId || "_draft",
+      file,
+      step: selectedUploadStep()
+    });
+  }
+
+  async function copyAttachmentPrompt() {
+    const prompt = currentAttachmentPrompt();
+    if (!prompt) return;
+    await navigator.clipboard.writeText(prompt);
+    messageApi.success("附件提示词已复制");
+  }
+
+  function fillAttachmentPromptToAi() {
+    const prompt = currentAttachmentPrompt();
+    if (!prompt) return;
+    setAiMode("continue");
+    setAiInstruction(prompt);
+    setAiOpen(true);
+    setPromptOpen(false);
+    messageApi.success("已填入 AI 助手");
   }
 
   if (loading) {
@@ -245,6 +554,25 @@ export default function CaseEditor() {
   return (
     <div className="flex min-h-full flex-col gap-2.5">
       {contextHolder}
+      {dropCopy ? (
+        <div className="case-editor-drop-sense fixed inset-0 z-[2147483000] flex items-center justify-center px-8">
+          <div
+            className={cn(
+              "case-editor-drop-sense__panel",
+              pageDropTarget === "aiInstruction" ? "case-editor-drop-sense__panel--ai" : "case-editor-drop-sense__panel--case"
+            )}
+          >
+            <UploadOutlined className="case-editor-drop-sense__icon" />
+            <Typography.Title level={3} className="!mb-2 !mt-0 !text-inherit">
+              {dropCopy.title}
+            </Typography.Title>
+            <Typography.Text className="!text-inherit">
+              {dropCopy.description}
+            </Typography.Text>
+            <div className="case-editor-drop-sense__line" />
+          </div>
+        </div>
+      ) : null}
       <PageHeader
         title={activeCase?.caseName ?? caseId}
         description={activeCase?.file}
@@ -323,6 +651,7 @@ export default function CaseEditor() {
           </Card>
         </Col>
         <Col xs={24} xl={8}>
+          <div className="xl:sticky xl:top-0 xl:max-h-[calc(100vh-120px)] xl:overflow-y-auto xl:pr-1">
           <Card title="AI YAML 助手" className="mb-2.5">
             <div className="flex flex-col gap-2.5">
               <Typography.Text type="secondary">选择生成方式，AI 会先给出可校验草稿，确认后再应用到编辑器。</Typography.Text>
@@ -336,6 +665,124 @@ export default function CaseEditor() {
               <Button block type="primary" icon={<RobotOutlined />} className="mt-0.5" onClick={() => openAiAssistant(aiMode)}>
                 打开 AI 助手
               </Button>
+            </div>
+          </Card>
+          <Card
+            title="测试附件"
+            className="mb-2.5"
+            extra={selectedPromptFileList.length ? <Tag color="processing">已选 {selectedPromptFileList.length}</Tag> : null}
+          >
+            <div className="flex flex-col gap-2.5">
+              <Typography.Text type="secondary">
+                附件会保存到 uploads/cases/{normalizeCaseId(caseId || activeCase?.caseId || "_draft")}，YAML 使用返回的项目相对路径。
+              </Typography.Text>
+              <Select
+                size="small"
+                placeholder="选择要写入 file 的 web_upload 步骤"
+                value={effectiveUploadStepId}
+                options={uploadSteps.map((step) => ({ label: `${step.stepId} · ${step.name}`, value: step.stepId }))}
+                disabled={!uploadSteps.length}
+                onChange={setSelectedUploadStepId}
+              />
+              <Upload.Dragger
+                multiple
+                showUploadList={false}
+                beforeUpload={handleAttachmentBeforeUpload}
+                disabled={attachmentUploading}
+              >
+                <p className="ant-upload-drag-icon">
+                  <UploadOutlined />
+                </p>
+                <p className="ant-upload-text">上传图片或任意测试附件</p>
+                <p className="ant-upload-hint">单文件最大 {attachmentUploadMaxMb}MB；复杂表单可上传多张，再生成通用提示词。</p>
+              </Upload.Dragger>
+              <Space.Compact className="w-full">
+                <Input
+                  allowClear
+                  size="small"
+                  value={attachmentQuery}
+                  placeholder="搜索文件夹/文件名/路径"
+                  onChange={(event) => setAttachmentQuery(event.target.value)}
+                  onPressEnter={() => void handleSearchAttachments()}
+                />
+                <Button size="small" icon={<SearchOutlined />} loading={attachmentSearching} onClick={() => void handleSearchAttachments()}>
+                  搜索
+                </Button>
+              </Space.Compact>
+              <Space wrap size={6}>
+                <Button
+                  size="small"
+                  icon={<RobotOutlined />}
+                  disabled={!attachments.length && !selectedPromptFileList.length}
+                  onClick={() => openAttachmentPrompt()}
+                >
+                  生成通用提示词
+                </Button>
+                <Button
+                  size="small"
+                  disabled={!selectedPromptFileList.length}
+                  onClick={() => setSelectedPromptFiles({})}
+                >
+                  清空选择
+                </Button>
+              </Space>
+              {visibleAttachments.length ? (
+                <div className="max-h-[260px] divide-y divide-slate-100 overflow-auto rounded border border-slate-100">
+                  {visibleAttachments.map((item) => (
+                    <div key={item.file} className="flex items-center justify-between gap-2 px-2 py-2 text-sm">
+                      <Checkbox
+                        checked={Boolean(selectedPromptFiles[item.file])}
+                        onChange={(event) => togglePromptFile(attachmentToPromptFile(item), event.target.checked)}
+                      />
+                      <span className="min-w-0 flex-1 truncate" title={item.file}>
+                        <PaperClipOutlined className="mr-1 text-slate-400" />
+                        {item.file}
+                      </span>
+                      <Space size={4}>
+                        <Button size="small" onClick={() => void copyAttachmentPath(item.file)}>
+                          复制
+                        </Button>
+                        <Button size="small" type="link" disabled={!effectiveUploadStepId} onClick={() => applyAttachment(item.file)}>
+                          引用
+                        </Button>
+                        <Button size="small" type="link" onClick={() => openAttachmentPrompt(item)}>
+                          提示词
+                        </Button>
+                        <Button size="small" danger type="link" title="删除附件" icon={<DeleteOutlined />} onClick={() => void deleteAttachment(item.file)} />
+                      </Space>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Alert type="info" showIcon title={attachmentQuery ? "当前附件列表没有匹配项，可以点击搜索从附件目录继续查找。" : "暂无附件，先上传图片或文件。"} />
+              )}
+              {visibleSearchResults.length ? (
+                <div className="max-h-[220px] divide-y divide-slate-100 overflow-auto rounded border border-slate-100">
+                  {visibleSearchResults.map((item) => (
+                    <div key={`${item.kind}-${item.file}`} className="flex items-center justify-between gap-2 px-2 py-2 text-sm">
+                      <span className="min-w-0 flex-1 truncate" title={item.file}>
+                        {item.kind === "directory" ? <FolderOpenOutlined className="mr-1 text-amber-500" /> : <PaperClipOutlined className="mr-1 text-slate-400" />}
+                        {item.file}
+                      </span>
+                      <Space size={4}>
+                        <Button size="small" onClick={() => void copyAttachmentPath(item.file)}>
+                          复制
+                        </Button>
+                        {item.kind === "file" ? (
+                          <>
+                            <Button size="small" type="link" disabled={!effectiveUploadStepId} onClick={() => applyAttachment(item.file)}>
+                              引用
+                            </Button>
+                            <Button size="small" type="link" onClick={() => togglePromptFile(searchResultToPromptFile(item), true)}>
+                              加入提示词
+                            </Button>
+                          </>
+                        ) : null}
+                      </Space>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           </Card>
           <Card
@@ -385,6 +832,7 @@ export default function CaseEditor() {
               </IssueStack>
             )}
           </Card>
+          </div>
         </Col>
       </Row>
       <Drawer
@@ -400,7 +848,7 @@ export default function CaseEditor() {
             <Button disabled={!aiDraft || aiStreaming} onClick={() => void handleApplyAiDraft()}>
               应用到编辑器
             </Button>
-            <Button type="primary" icon={<RobotOutlined />} loading={aiStreaming} onClick={() => void handleAiGenerate()}>
+            <Button type="primary" icon={<RobotOutlined />} loading={aiStreaming} disabled={aiInstructionUploading} onClick={() => void handleAiGenerate()}>
               {aiDraft ? "重新生成" : "生成"}
             </Button>
           </Space>
@@ -416,12 +864,62 @@ export default function CaseEditor() {
               </Space>
             </Card>
             <Card size="small" title="补充要求">
-              <Input.TextArea
-                rows={8}
-                value={aiInstruction}
-                placeholder="描述你要 AI 写什么、续写什么，或需要修复的问题。"
-                onChange={(event) => setAiInstruction(event.target.value)}
-              />
+              <Space orientation="vertical" size={10} className="w-full">
+                <Input.TextArea
+                  rows={8}
+                  value={aiInstruction}
+                  placeholder="描述你要 AI 写什么、续写什么，或需要修复的问题。"
+                  onChange={(event) => setAiInstruction(event.target.value)}
+                />
+                <Upload.Dragger
+                  multiple
+                  showUploadList={false}
+                  beforeUpload={handleAiInstructionAttachmentBeforeUpload}
+                  disabled={aiInstructionUploading}
+                >
+                  <p className="ant-upload-drag-icon">
+                    <UploadOutlined />
+                  </p>
+                  <p className="ant-upload-text">上传文件/图片作为本次 AI 对话资料</p>
+                  <p className="ant-upload-hint">只随本次生成发送给 AI，不保存到本地，也不会进入右侧测试附件。支持 docx、PDF、文本和 PNG/JPG/WebP，单文件最大 {aiMaterialUploadMaxMb}MB。</p>
+                </Upload.Dragger>
+                {aiInstructionAttachments.length ? (
+                  <div className="divide-y divide-slate-100 rounded border border-slate-100">
+                    {aiInstructionAttachments.map((item) => (
+                      <div key={item.uid} className="flex items-center gap-2 px-2 py-2 text-xs">
+                        {item.previewUrl ? (
+                          <button
+                            type="button"
+                            className="h-10 w-10 shrink-0 overflow-hidden rounded border border-slate-200 bg-slate-50"
+                            title="预览图片"
+                            onClick={() => setPreviewAttachment(item)}
+                          >
+                            <img src={item.previewUrl} alt={item.name} className="h-full w-full object-cover" />
+                          </button>
+                        ) : (
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-50 text-slate-400">
+                            <PaperClipOutlined />
+                          </span>
+                        )}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-slate-900" title={item.name}>{item.name}</span>
+                          <span className="block truncate text-[11px] text-slate-500" title="仅本次 AI 对话使用，不保存为用例附件">
+                            仅本次 AI 对话 · {formatBytes(item.sizeBytes)}{item.mimeType ? ` · ${item.mimeType}` : ""}
+                          </span>
+                        </span>
+                        <Space size={2}>
+                          {item.previewUrl ? (
+                            <Button size="small" type="link" icon={<EyeOutlined />} onClick={() => setPreviewAttachment(item)}>
+                              预览
+                            </Button>
+                          ) : null}
+                          <Button size="small" danger type="link" icon={<DeleteOutlined />} title="从本次对话移除" onClick={() => removeAiInstructionAttachment(item.uid)} />
+                        </Space>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </Space>
             </Card>
             {aiValidation ? (
               <Alert
@@ -446,6 +944,44 @@ export default function CaseEditor() {
           </div>
         </div>
       </Drawer>
+      <Modal
+        title="附件 AI 提示词"
+        open={promptOpen}
+        width={760}
+        okText="填入 AI 助手"
+        cancelText="关闭"
+        onOk={fillAttachmentPromptToAi}
+        onCancel={() => setPromptOpen(false)}
+        footer={(_, { OkBtn, CancelBtn }) => (
+          <Space>
+            <Button icon={<CopyOutlined />} disabled={!promptFiles.length && !promptAttachment} onClick={() => void copyAttachmentPrompt()}>
+              复制提示词
+            </Button>
+            <CancelBtn />
+            <OkBtn />
+          </Space>
+        )}
+      >
+        <Space orientation="vertical" size={12} className="w-full">
+          <Alert
+            type="info"
+            showIcon
+            title="复制给 AI，或直接填入右侧 AI YAML 助手的补充要求。"
+          />
+          <Input.TextArea rows={16} value={currentAttachmentPrompt()} readOnly />
+        </Space>
+      </Modal>
+      <Modal
+        title={previewAttachment?.name ?? "图片预览"}
+        open={Boolean(previewAttachment)}
+        width={820}
+        footer={null}
+        onCancel={() => setPreviewAttachment(undefined)}
+      >
+        {previewAttachment?.previewUrl ? (
+          <img src={previewAttachment.previewUrl} alt={previewAttachment.name} className="max-h-[70vh] w-full object-contain" />
+        ) : null}
+      </Modal>
     </div>
   );
 }
@@ -461,6 +997,65 @@ function IssueItem({ title, description }: { title: ReactNode; description: Reac
       <div className="text-sm text-slate-500">{description}</div>
     </div>
   );
+}
+
+function attachmentToPromptFile(attachment: CaseAttachmentResult): AttachmentPromptFile {
+  return {
+    name: attachment.name,
+    file: attachment.file
+  };
+}
+
+function searchResultToPromptFile(item: CaseAttachmentSearchResult): AttachmentPromptFile {
+  return {
+    name: item.name,
+    file: item.file
+  };
+}
+
+function aiInstructionAttachmentToFile(item: AiInstructionAttachmentItem): AiMaterialFileInput {
+  return {
+    name: item.name,
+    mimeType: item.mimeType,
+    base64: item.base64
+  };
+}
+
+function attachmentMatches(attachment: CaseAttachmentResult, query: string): boolean {
+  const keyword = query.trim().toLowerCase();
+  if (!keyword) {
+    return true;
+  }
+  return attachment.name.toLowerCase().includes(keyword) || attachment.file.toLowerCase().includes(keyword);
+}
+
+async function readFileAsBase64(file: File): Promise<string> {
+  return dataUrlToBase64(await readFileAsDataUrl(file));
+}
+
+async function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error ?? new Error(`${file.name} 文件读取失败`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function dataUrlToBase64(dataUrl: string): string {
+  return dataUrl.split(",")[1] ?? "";
+}
+
+function toRcFile(file: File, index: number): RcFile {
+  const rcFile = file as RcFile;
+  rcFile.uid = `${file.name}-${file.lastModified}-${index}`;
+  return rcFile;
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function normalizeAiYaml(content: string): string {

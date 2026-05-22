@@ -16,6 +16,7 @@ import type { RunLogger } from "../utils/logger";
 import { buildLoginStillPendingMessage, isLoginUrl } from "./login-result";
 import { createLocatorPlans, type LocatorPlan } from "./locator-candidates";
 import type { VisualExecutor } from "./visual-executor";
+import { resolveUploadFilePath } from "../utils/upload-file";
 
 export class WebExecutor {
   private readonly recordedPages = new WeakSet<Page>();
@@ -69,6 +70,9 @@ export class WebExecutor {
       case "web_input":
         await this.inputText(page, step);
         return { message: "输入完成" };
+      case "web_select":
+        await this.selectOption(page, step);
+        return { message: "选择完成" };
       case "web_upload":
         return this.withApiWait(page, step, async () => {
           await this.upload(page, step);
@@ -442,6 +446,12 @@ export class WebExecutor {
     await locator.fill(this.resolve(step.value), { timeout: this.timeoutMs(step) });
   }
 
+  private async selectOption(page: Page, step: ScenarioStep): Promise<void> {
+    const locator = await this.locator(page, step);
+    await this.input.visual.highlight(page, locator);
+    await locator.selectOption(this.resolve(step.value), { timeout: this.timeoutMs(step) });
+  }
+
   private async click(page: Page, step: ScenarioStep): Promise<void> {
     const locator = await this.locator(page, step);
     await this.input.visual.highlight(page, locator);
@@ -450,9 +460,10 @@ export class WebExecutor {
   }
 
   private async upload(page: Page, step: ScenarioStep): Promise<void> {
-    const locator = await this.locator(page, step);
-    await this.input.visual.highlight(page, locator);
-    await locator.setInputFiles(path.resolve(this.input.rootDir, this.resolve(step.file)), { timeout: this.timeoutMs(step) });
+    const locator = await this.uploadLocator(page, step);
+    await this.input.visual.highlight(page, locator).catch(() => undefined);
+    const filePath = resolveUploadFilePath(this.input.rootDir, this.resolve(step.file));
+    await locator.setInputFiles(filePath, { timeout: this.timeoutMs(step) });
   }
 
   private async assertText(page: Page, step: ScenarioStep): Promise<void> {
@@ -487,6 +498,49 @@ export class WebExecutor {
     return this.resolveInlineTarget(page, step);
   }
 
+  private async uploadLocator(page: Page, step: ScenarioStep): Promise<Locator> {
+    if (!step.target) {
+      throw new Error(`${step.type} 必须指定 target`);
+    }
+    const timeoutMs = this.timeoutMs(step);
+    const definition = this.input.locations[step.target];
+    if (definition) {
+      return this.resolveUploadLocatorPlans(page, createLocatorPlans(definition), timeoutMs);
+    }
+
+    const target = this.resolve(step.target);
+    return this.resolveUploadLocatorPlans(page, this.inlineTargetPlans(step.type, target), timeoutMs);
+  }
+
+  private async resolveUploadLocatorPlans(page: Page, plans: LocatorPlan[], timeoutMs: number): Promise<Locator> {
+    if (!plans.length) {
+      throw new Error("上传定位定义为空");
+    }
+    const perCandidateTimeout = Math.max(800, Math.min(2_000, Math.floor(timeoutMs / plans.length)));
+    const failures: string[] = [];
+
+    for (const plan of plans) {
+      const locator = this.buildLocator(page, plan).first();
+      try {
+        await locator.waitFor({ state: "attached", timeout: perCandidateTimeout });
+        if (await this.isFileInput(locator)) {
+          return locator;
+        }
+        const nestedInput = locator.locator("input[type='file']").first();
+        await nestedInput.waitFor({ state: "attached", timeout: perCandidateTimeout });
+        return nestedInput;
+      } catch {
+        failures.push(`${plan.kind}=${plan.value}`);
+      }
+    }
+
+    throw new Error(`未找到文件上传 input，已尝试：${failures.join(" -> ")}`);
+  }
+
+  private async isFileInput(locator: Locator): Promise<boolean> {
+    return locator.evaluate((element) => element instanceof HTMLInputElement && element.type === "file").catch(() => false);
+  }
+
   private async resolveInlineTarget(page: Page, step: ScenarioStep): Promise<Locator> {
     const target = this.resolve(step.target);
     const timeoutMs = this.timeoutMs(step);
@@ -519,17 +573,18 @@ export class WebExecutor {
       { kind: "text", value: target },
       { kind: "role", value: "button", name: target }
     ];
-    if (type === "web_input") {
+    if (type === "web_input" || type === "web_select") {
+      const formControl = type === "web_select" ? "select" : "input[not(@type='hidden')]";
       return [
         { kind: "label", value: target },
         { kind: "placeholder", value: target },
         {
           kind: "xpath",
-          value: `//*[normalize-space()=${xpathTarget}]/ancestor::*[contains(@class,'form-item') or contains(@class,'el-form-item') or self::label][1]//input[not(@type='hidden')]`
+          value: `//*[normalize-space()=${xpathTarget}]/ancestor::*[contains(@class,'form-item') or contains(@class,'el-form-item') or self::label][1]//${formControl}`
         },
         {
           kind: "xpath",
-          value: `//*[contains(normalize-space(),${xpathTarget})]/following::input[not(@type='hidden')][1]`
+          value: `//*[contains(normalize-space(),${xpathTarget})]/following::${formControl}[1]`
         },
         { kind: "text", value: target },
         { kind: "css", value: `[name="${target}"]` }

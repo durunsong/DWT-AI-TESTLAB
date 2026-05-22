@@ -102,6 +102,65 @@ describe("preflightScenarioContent", () => {
     assert.equal(result.summary.apiSteps, 1);
     assert.equal(result.summary.errors, 0);
   });
+
+  it("resolves upload files from scenario variables before run", async () => {
+    const rootDir = await tempWorkspace();
+    const uploadPath = path.join(rootDir, "uploads", "cases", "preflight_case", "license.bin");
+    await fs.mkdir(path.dirname(uploadPath), { recursive: true });
+    await fs.writeFile(uploadPath, "fixture", "utf8");
+
+    const result = await preflightScenarioContent({
+      rootDir,
+      content: scenarioYaml({
+        variables: [
+          "  license_file: uploads/cases/preflight_case/license.bin"
+        ],
+        sessions: [
+          "  - name: user",
+          "    login_url: \"https://example.test/login\""
+        ],
+        steps: [
+          "  - step_id: upload_license",
+          "    name: upload license",
+          "    type: web_upload",
+          "    session: user",
+          "    target: known_button",
+          "    file: \"${var.license_file}\""
+        ]
+      })
+    });
+
+    assert.equal(result.runnable, true);
+    assert.equal(result.issues.some((issue) => issue.code === "upload_file_dynamic"), false);
+    assert.equal(result.summary.errors, 0);
+  });
+
+  it("rejects upload files outside workspace root", async () => {
+    const rootDir = await tempWorkspace();
+    const outsideFile = path.resolve(rootDir, "..", "outside-upload.txt");
+    await fs.writeFile(outsideFile, "outside", "utf8");
+
+    const result = await preflightScenarioContent({
+      rootDir,
+      content: scenarioYaml({
+        sessions: [
+          "  - name: user",
+          "    login_url: \"https://example.test/login\""
+        ],
+        steps: [
+          "  - step_id: upload_outside",
+          "    name: upload outside",
+          "    type: web_upload",
+          "    session: user",
+          "    target: known_button",
+          `    file: ${JSON.stringify(path.relative(rootDir, outsideFile).replace(/\\/g, "/"))}`
+        ]
+      })
+    });
+
+    assert.equal(result.runnable, false);
+    assert.equal(result.issues.some((issue) => issue.code === "upload_file_outside_root"), true);
+  });
 });
 
 async function tempWorkspace(): Promise<string> {
@@ -115,11 +174,12 @@ async function tempWorkspace(): Promise<string> {
   return rootDir;
 }
 
-function scenarioYaml(input: { sessions: string[]; steps: string[] }): string {
+function scenarioYaml(input: { variables?: string[]; sessions: string[]; steps: string[] }): string {
   return [
     "case_id: preflight_case",
     "case_name: Preflight Case",
     "mode: web",
+    ...(input.variables?.length ? ["variables:", ...input.variables] : []),
     "sessions:",
     ...input.sessions,
     "locations:",

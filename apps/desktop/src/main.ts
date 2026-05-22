@@ -80,6 +80,7 @@ async function createMainWindow(platformConfig: PlatformConfig): Promise<void> {
     icon: desktopIconPath(),
     show: false,
     title: windowConfig.title,
+    autoHideMenuBar: !windowConfig.menuBarVisible,
     webPreferences: {
       preload: path.resolve(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -87,6 +88,11 @@ async function createMainWindow(platformConfig: PlatformConfig): Promise<void> {
       sandbox: false
     }
   });
+
+  if (!windowConfig.menuBarVisible) {
+    mainWindow.setMenu(null);
+    mainWindow.setMenuBarVisibility(false);
+  }
 
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();

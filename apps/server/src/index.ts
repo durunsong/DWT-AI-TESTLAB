@@ -48,13 +48,13 @@ export async function createServer(options: CreateServerOptions): Promise<Fastif
 
   const runner = new ScenarioOrchestrator(rootDir);
   const envConfigService = new EnvConfigService(rootDir);
-  const caseService = new CaseService(runner, rootDir, envConfigService);
+  const caseService = new CaseService(runner, rootDir, envConfigService, platformConfig);
   const testRunService = new TestRunService(runner, rootDir, envConfigService, platformConfig);
   const reportService = new ReportService(rootDir, platformConfig);
   const appContextService = new AppContextService(rootDir, platformConfig);
   const dbService = new DbService();
 
-  await registerCaseRoutes(app, caseService);
+  await registerCaseRoutes(app, caseService, platformConfig);
   await registerTestRunRoutes(app, testRunService, reportService);
   await registerTestRunEventRoutes(app, testRunService);
   await registerAiRoutes(app, rootDir, platformConfig);

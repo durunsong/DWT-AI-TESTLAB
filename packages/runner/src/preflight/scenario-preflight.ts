@@ -1,9 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
-import { locationMapSchema, type LocationMap, type ScenarioCase, type ScenarioStep } from "@ai-e2e/shared";
+import { locationMapSchema, resolveVariables, type LocationMap, type RuntimeContextState, type ScenarioCase, type ScenarioStep } from "@ai-e2e/shared";
 import { EnvGuard } from "../utils/env-guard";
-import { validateScenarioContent } from "../loader/scenario-loader";
+import { validateScenarioContentForRun } from "../loader/scenario-loader";
+import { resolveUploadFilePath } from "../utils/upload-file";
 
 export type PreflightSeverity = "error" | "warning";
 
@@ -37,7 +38,7 @@ export async function preflightScenarioContent(input: {
   env?: string;
 }): Promise<ScenarioPreflightResult> {
   const env = input.env ?? process.env.TEST_ENV ?? "local";
-  const validation = validateScenarioContent(input.content);
+  const validation = await validateScenarioContentForRun(input.rootDir, input.content);
   const issues: PreflightIssue[] = validation.issues.map((issue) => ({
     severity: "error",
     code: "dsl_invalid",
@@ -184,6 +185,7 @@ function checkSessions(scenario: ScenarioCase, issues: PreflightIssue[]): void {
 
 async function checkSteps(rootDir: string, scenario: ScenarioCase, locations: LocationMap | undefined, issues: PreflightIssue[]): Promise<void> {
   const sessions = new Set(scenario.sessions.map((session) => session.name));
+  const state = createPreflightState(scenario);
   for (const [index, step] of scenario.steps.entries()) {
     const basePath = `steps.${index}`;
     if (step.session && !sessions.has(step.session)) {
@@ -204,7 +206,7 @@ async function checkSteps(rootDir: string, scenario: ScenarioCase, locations: Lo
     }
 
     if (step.type === "web_upload") {
-      await checkUploadFile(rootDir, step, basePath, issues);
+      await checkUploadFile(rootDir, step, state, basePath, issues);
     }
   }
 }
@@ -222,11 +224,11 @@ function checkWebStep(step: ScenarioStep, pathPrefix: string, locations: Locatio
   if (step.type === "web_open" && !step.url) {
     issues.push({ severity: "error", code: "web_url_missing", path: `${pathPrefix}.url`, message: "web_open 必须指定 url" });
   }
-  if (["web_click", "web_input", "web_upload", "web_wait_text", "web_wait_element", "web_assert_text", "web_assert_visible", "web_extract"].includes(step.type) && !step.target) {
+  if (["web_click", "web_input", "web_select", "web_upload", "web_wait_text", "web_wait_element", "web_assert_text", "web_assert_visible", "web_extract"].includes(step.type) && !step.target) {
     issues.push({ severity: "error", code: "web_target_missing", path: `${pathPrefix}.target`, message: `${step.type} 必须指定 target` });
   }
-  if (step.type === "web_input" && step.value === undefined) {
-    issues.push({ severity: "error", code: "web_value_missing", path: `${pathPrefix}.value`, message: "web_input 必须指定 value" });
+  if ((step.type === "web_input" || step.type === "web_select") && step.value === undefined) {
+    issues.push({ severity: "error", code: "web_value_missing", path: `${pathPrefix}.value`, message: `${step.type} 必须指定 value` });
   }
   if ((step.type === "web_assert_text" || step.type === "web_wait_text") && step.expected === undefined) {
     issues.push({ severity: "error", code: "web_expected_missing", path: `${pathPrefix}.expected`, message: `${step.type} 必须指定 expected` });
@@ -268,6 +270,14 @@ function checkApiStep(step: ScenarioStep, pathPrefix: string, issues: PreflightI
 }
 
 function checkDbStep(step: ScenarioStep, pathPrefix: string, issues: PreflightIssue[]): void {
+  if (step.type === "db_clean") {
+    issues.push({
+      severity: "error",
+      code: "db_clean_disabled",
+      path: pathPrefix,
+      message: "db_clean 当前未开放，DB 能力只允许只读查询和断言"
+    });
+  }
   if (process.env.DB_ENABLED !== "true") {
     issues.push({
       severity: "error",
@@ -284,30 +294,85 @@ function checkDbStep(step: ScenarioStep, pathPrefix: string, issues: PreflightIs
   }
 }
 
-async function checkUploadFile(rootDir: string, step: ScenarioStep, pathPrefix: string, issues: PreflightIssue[]): Promise<void> {
+async function checkUploadFile(
+  rootDir: string,
+  step: ScenarioStep,
+  state: RuntimeContextState,
+  pathPrefix: string,
+  issues: PreflightIssue[]
+): Promise<void> {
   if (!step.file) {
     issues.push({ severity: "error", code: "upload_file_missing", path: `${pathPrefix}.file`, message: "web_upload 必须指定 file" });
     return;
   }
-  if (step.file.includes("${")) {
+
+  let resolvedFile: string;
+  try {
+    resolvedFile = resolveUploadFileExpression(step.file, state, step);
+  } catch (error) {
     issues.push({
-      severity: "warning",
-      code: "upload_file_dynamic",
+      severity: "error",
+      code: "upload_file_unresolved",
       path: `${pathPrefix}.file`,
-      message: "上传文件使用变量，预检无法确认文件是否存在"
+      message: `上传文件路径变量无法解析：${error instanceof Error ? error.message : String(error)}`
     });
     return;
   }
 
-  const filePath = path.resolve(rootDir, step.file);
-  await fs.access(filePath).catch(() => {
+  let filePath: string;
+  try {
+    filePath = resolveUploadFilePath(rootDir, resolvedFile);
+  } catch (error) {
+    issues.push({
+      severity: "error",
+      code: "upload_file_outside_root",
+      path: `${pathPrefix}.file`,
+      message: error instanceof Error ? error.message : String(error)
+    });
+    return;
+  }
+
+  await fs.stat(filePath).then((stat) => {
+    if (!stat.isFile()) {
+      issues.push({
+        severity: "error",
+        code: "upload_file_not_file",
+        path: `${pathPrefix}.file`,
+        message: `上传路径不是文件：${resolvedFile}`
+      });
+    }
+  }).catch(() => {
     issues.push({
       severity: "error",
       code: "upload_file_missing_on_disk",
       path: `${pathPrefix}.file`,
-      message: `上传文件不存在：${step.file}`
+      message: `上传文件不存在：${resolvedFile}`
     });
   });
+}
+
+function createPreflightState(scenario: ScenarioCase): RuntimeContextState {
+  const sessions = Object.fromEntries(scenario.sessions.map((session) => [session.name, session]));
+  return {
+    runId: "preflight",
+    env: process.env.TEST_ENV ?? "local",
+    scenario,
+    timestamp: "preflight",
+    variables: scenario.variables ?? {},
+    sessions
+  };
+}
+
+function resolveUploadFileExpression(input: string, state: RuntimeContextState, step: ScenarioStep): string {
+  let current = input;
+  for (let index = 0; index < 5; index += 1) {
+    const next = resolveVariables(current, state, step);
+    if (next === current || !next.includes("${")) {
+      return next;
+    }
+    current = next;
+  }
+  return current;
 }
 
 function collectEnvRefs(value: unknown): string[] {

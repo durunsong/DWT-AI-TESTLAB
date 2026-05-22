@@ -20,6 +20,7 @@ export type RunnerEventHandler = (event: TestRunEvent) => void | Promise<void>;
 export interface ScenarioRunInput {
   caseId: string;
   env: string;
+  filePath?: string;
   runId?: string;
   onEvent?: RunnerEventHandler;
 }
@@ -43,7 +44,9 @@ export class ScenarioOrchestrator {
 
   async run(input: ScenarioRunInput): Promise<RunReport> {
     EnvGuard.assertRunnable(input.env);
-    const scenario = await this.scenarioLoader.loadByCaseId(input.caseId);
+    const scenario = input.filePath
+      ? await this.scenarioLoader.load(input.filePath)
+      : await this.scenarioLoader.loadByCaseId(input.caseId);
     const runId = input.runId ?? `run_${crypto.randomUUID().slice(0, 8)}`;
     const startedAt = new Date().toISOString();
     const artifacts = await createArtifactPaths(this.rootDir, runId, this.platformConfig);
@@ -95,7 +98,7 @@ export class ScenarioOrchestrator {
         const stepResult = steps[index];
         if (!originalStep || !stepResult) continue;
 
-        if (failed) {
+        if (failed && originalStep.phase !== "afterActions") {
           stepResult.status = "skipped";
           await this.emit(input.onEvent, { runId, type: "step_updated", status: "skipped", step: stepResult, at: new Date().toISOString() });
           continue;
@@ -138,7 +141,7 @@ export class ScenarioOrchestrator {
           stepResult.error = error instanceof Error ? error.message : String(error);
           await logger.error(`步骤执行失败：${step.step_id}`, { error: stepResult.error, data: stepResult.data });
           await this.emit(input.onEvent, { runId, type: "step_updated", status: "failed", step: stepResult, at: stepResult.endedAt });
-          failed = !step.continue_on_failure;
+          failed = step.phase === "afterActions" || !step.continue_on_failure;
         }
       }
     } catch (error) {

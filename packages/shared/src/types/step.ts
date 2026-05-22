@@ -2,6 +2,7 @@ import type { SessionName } from "../constants/session";
 import type { StepType } from "../constants/step-types";
 
 export type StepStatus = "pending" | "running" | "passed" | "failed" | "skipped";
+export type ScenarioStepPhase = "beforeActions" | "mainSteps" | "assertions" | "afterActions" | "steps";
 export type DbParam = string | number | boolean | null;
 export type DbExpected = Record<string, string | number | boolean | null>;
 export type ApiExpectedValue = string | number | boolean | null;
@@ -46,6 +47,7 @@ export interface ScenarioStep {
   step_id: string;
   name: string;
   type: StepType;
+  phase?: ScenarioStepPhase;
   session?: SessionName;
   target?: string;
   url?: string;

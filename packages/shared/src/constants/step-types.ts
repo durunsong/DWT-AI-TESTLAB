@@ -3,6 +3,7 @@ export const P0_STEP_TYPES = [
   "web_reload",
   "web_input",
   "web_click",
+  "web_select",
   "web_upload",
   "web_wait_text",
   "web_wait_element",

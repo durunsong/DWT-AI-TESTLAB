@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { preflightScenarioContent } from "./preflight/scenario-preflight";
-import { ScenarioLoader, validateScenarioContent } from "./loader/scenario-loader";
+import { ScenarioLoader, validateScenarioContent, validateScenarioContentForRun } from "./loader/scenario-loader";
 import { ScenarioOrchestrator } from "./orchestrator/scenario-orchestrator";
 import { loadPlatformConfig } from "./config/platform-config";
 
@@ -43,11 +43,11 @@ async function main(): Promise<void> {
   }
 
   if (command === "run") {
-    const caseId = args.find((arg) => !arg.startsWith("--"));
-    if (!caseId) {
-      throw new Error("run 命令必须指定 caseId");
+    const target = args.find((arg) => !arg.startsWith("--"));
+    if (!target) {
+      throw new Error("run 命令必须指定 caseId 或 YAML 文件");
     }
-    await runCase(rootDir, caseId, options);
+    await runCase(rootDir, target, options);
     return;
   }
 
@@ -75,7 +75,7 @@ async function validateCases(rootDir: string, target?: string): Promise<void> {
   let failed = 0;
   for (const file of files) {
     const content = await fs.readFile(file, "utf8");
-    const result = validateScenarioContent(content);
+    const result = await validateScenarioContentForRun(rootDir, content);
     const relative = path.relative(rootDir, file);
     if (result.valid) {
       console.log(`PASS ${relative} (${result.caseId})`);
@@ -94,7 +94,7 @@ async function validateCases(rootDir: string, target?: string): Promise<void> {
   }
 }
 
-async function runCase(rootDir: string, caseId: string, options: CliOptions): Promise<void> {
+async function runCase(rootDir: string, target: string, options: CliOptions): Promise<void> {
   if (options.envFile !== false) {
     await loadEnvFiles(rootDir, options.env);
   }
@@ -102,9 +102,17 @@ async function runCase(rootDir: string, caseId: string, options: CliOptions): Pr
     process.env.HEADLESS = String(options.headless);
   }
 
+  const filePath = await resolveCaseTarget(rootDir, target);
+  const content = await fs.readFile(filePath, "utf8");
+  const validation = validateScenarioContent(content);
+  if (!validation.caseId) {
+    throw new Error(`无法从 YAML 中读取 case_id：${path.relative(rootDir, filePath)}`);
+  }
+
   const runner = new ScenarioOrchestrator(rootDir);
   const report = await runner.run({
-    caseId,
+    caseId: validation.caseId,
+    filePath,
     env: options.env,
     onEvent: (event) => {
       if (event.type === "run_started") {
@@ -158,7 +166,7 @@ async function resolveCaseTarget(rootDir: string, target: string): Promise<strin
   const files = await scenarioFiles(rootDir);
   for (const file of files) {
     const content = await fs.readFile(file, "utf8");
-    const result = validateScenarioContent(content);
+    const result = await validateScenarioContentForRun(rootDir, content);
     if (result.caseId === target) {
       return file;
     }
@@ -250,7 +258,7 @@ function printHelp(): void {
     "  pnpm dwt validate [caseId|file]",
     "  pnpm dwt preflight <caseId|file> [--env=local|dev|test|sit] [--no-env-file]",
     "  pnpm dwt plan <caseId|file> [--env=local|dev|test|sit] [--no-env-file]",
-    "  pnpm dwt run <caseId> [--env=local|dev|test|sit] [--headless|--headed] [--no-env-file]",
+    "  pnpm dwt run <caseId|file> [--env=local|dev|test|sit] [--headless|--headed] [--no-env-file]",
     "",
     "Examples:",
     "  pnpm dwt validate admin_profile_update",

@@ -71,8 +71,28 @@ export interface SaveCaseResult {
   validation: CaseValidationResult;
 }
 
+export interface CaseAttachmentResult {
+  name: string;
+  file: string;
+  sizeBytes: number;
+}
+
+export interface CaseAttachmentSearchResult {
+  kind: "file" | "directory";
+  name: string;
+  file: string;
+  sizeBytes?: number;
+}
+
+export interface DeleteAttachmentResult {
+  deleted: boolean;
+  file: string;
+}
+
 export interface DeleteCaseResult {
   deleted: boolean;
   caseId: string;
   file: string;
+  attachmentsDeleted?: boolean;
+  attachmentsDir?: string;
 }

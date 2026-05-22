@@ -11,8 +11,10 @@ test("loads configurable platform fields with defaults", async () => {
     path.join(rootDir, "platform.config.json"),
     JSON.stringify({
       web: { requestTimeoutMs: 120000, storageKey: "team-settings" },
+      desktop: { window: { menuBarVisible: false } },
       artifacts: { reportsDir: "runtime/reports" },
-      browser: { defaultViewport: { width: 1600, height: 900 } }
+      browser: { defaultViewport: { width: 1600, height: 900 } },
+      uploads: { caseAttachmentMaxMb: 32, caseAttachmentBaseDir: "uploads/test-cases" }
     }),
     "utf8"
   );
@@ -21,9 +23,12 @@ test("loads configurable platform fields with defaults", async () => {
 
   assert.equal(config.web.requestTimeoutMs, 120000);
   assert.equal(config.web.storageKey, "team-settings");
+  assert.equal(config.desktop.window.menuBarVisible, false);
   assert.equal(config.artifacts.reportsDir, "runtime/reports");
   assert.equal(config.artifacts.logsDir, "logs");
   assert.deepEqual(config.browser.defaultViewport, { width: 1600, height: 900 });
+  assert.equal(config.uploads.caseAttachmentMaxMb, 32);
+  assert.equal(config.uploads.caseAttachmentBaseDir, "uploads/test-cases");
 });
 
 test("rejects artifact directories outside workspace root", () => {

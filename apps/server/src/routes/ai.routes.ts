@@ -160,8 +160,9 @@ export async function registerAiRoutes(app: FastifyInstance, rootDir: string, pl
       currentYaml: string;
       instruction?: string;
       validationIssues?: Array<{ path: string; message: string }>;
+      files?: AiMaterialFile[];
     };
-  }>("/api/ai/cases/assist/stream", async (request, reply) => {
+  }>("/api/ai/cases/assist/stream", { bodyLimit: materialBodyLimit }, async (request, reply) => {
     reply.raw.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",
       "cache-control": "no-cache",
@@ -169,12 +170,25 @@ export async function registerAiRoutes(app: FastifyInstance, rootDir: string, pl
     });
 
     try {
-      const prompt = buildCaseYamlAssistPrompt(request.body);
+      const sources = await extractMaterialFiles(request.body.files, platformConfig.uploads);
+      const imageMaterials = (request.body.files ?? [])
+        .filter(isImageMaterialFile)
+        .map((file) => imageMaterialToDataUrl(file, platformConfig.uploads));
+      const prompt = appendAssistMaterials(buildCaseYamlAssistPrompt(request.body), sources, imageMaterials);
       const client = new OpenAiCompatibleClient({ temperature: 0.15 });
+      const userContent: AiChatMessage["content"] = imageMaterials.length
+        ? [
+          { type: "text", text: prompt },
+          ...imageMaterials.flatMap((item) => [
+            { type: "text" as const, text: item.title },
+            { type: "image_url" as const, image_url: { url: item.dataUrl } }
+          ])
+        ]
+        : prompt;
 
       for await (const chunk of client.chatStream([
         { role: "system", content: "你是自动化测试 DSL 编辑助手。你必须只输出最终 YAML 正文，不输出解释。" },
-        { role: "user", content: prompt }
+        { role: "user", content: userContent }
       ])) {
         reply.raw.write(`event: chunk\n`);
         reply.raw.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
@@ -189,4 +203,34 @@ export async function registerAiRoutes(app: FastifyInstance, rootDir: string, pl
       reply.raw.end();
     }
   });
+}
+
+function appendAssistMaterials(
+  prompt: string,
+  sources: Array<{ title: string; content: string }>,
+  imageMaterials: Array<{ title: string; dataUrl: string }>
+): string {
+  if (!sources.length && !imageMaterials.length) {
+    return prompt;
+  }
+
+  const sections = [
+    prompt,
+    "",
+    "AI 对话临时上传资料（仅用于本次生成，不保存为用例附件）："
+  ];
+
+  for (const source of sources) {
+    sections.push("", `## ${source.title}`, source.content);
+  }
+
+  if (imageMaterials.length) {
+    sections.push(
+      "",
+      "以下图片资料会以图片形式随本次对话发送，请结合图片理解页面元素、上传控件、字段和断言点。",
+      ...imageMaterials.map((item) => `- ${item.title}`)
+    );
+  }
+
+  return sections.join("\n");
 }

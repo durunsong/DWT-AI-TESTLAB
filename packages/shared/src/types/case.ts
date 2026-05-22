@@ -1,7 +1,7 @@
 import type { SessionName } from "../constants/session";
 import type { ScenarioStep } from "./step";
 
-export type ScenarioMode = "web" | "hybrid";
+export type ScenarioMode = "web" | "api" | "hybrid";
 
 export interface ScenarioSession {
   name: SessionName;

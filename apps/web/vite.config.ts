@@ -103,6 +103,7 @@ function buildViteEnvDefine(env: Record<string, string>): Record<string, string>
     VITE_APP_PRODUCT_NAME: platformConfig.app.productName,
     VITE_APP_CONTEXT_BODY_LIMIT_MB: String(platformConfig.uploads.contextBodyLimitMb),
     VITE_APP_UPLOAD_MAX_MB: String(platformConfig.uploads.materialFileMaxMb),
+    VITE_APP_CASE_ATTACHMENT_MAX_MB: String(platformConfig.uploads.caseAttachmentMaxMb),
     VITE_APP_REQUEST_TIMEOUT_MS: String(platformConfig.web.requestTimeoutMs),
     VITE_APP_STORAGE_KEY: platformConfig.web.storageKey,
     ...env
@@ -117,7 +118,7 @@ function buildViteEnvDefine(env: Record<string, string>): Record<string, string>
 function readPlatformConfig(): {
   app: { brandName: string; productName: string };
   web: { host: string; port: number; devApiProxyTarget: string; requestTimeoutMs: number; storageKey: string };
-  uploads: { contextBodyLimitMb: number; materialFileMaxMb: number };
+  uploads: { contextBodyLimitMb: number; materialFileMaxMb: number; caseAttachmentMaxMb: number };
 } {
   const fallback = {
     app: { brandName: "DWT Testing", productName: "DWT Testing" },
@@ -125,10 +126,10 @@ function readPlatformConfig(): {
       host: "0.0.0.0",
       port: 4301,
       devApiProxyTarget: "http://localhost:4300",
-      requestTimeoutMs: 60_000,
+      requestTimeoutMs: 20_000,
       storageKey: "dwt-testing-settings"
     },
-    uploads: { contextBodyLimitMb: 5, materialFileMaxMb: 8 }
+    uploads: { contextBodyLimitMb: 5, materialFileMaxMb: 8, caseAttachmentMaxMb: 20 }
   };
   const configPath = path.resolve(rootDir, "platform.config.json");
   if (!fs.existsSync(configPath)) {
@@ -150,7 +151,8 @@ function readPlatformConfig(): {
     },
     uploads: {
       contextBodyLimitMb: raw.uploads?.contextBodyLimitMb || fallback.uploads.contextBodyLimitMb,
-      materialFileMaxMb: raw.uploads?.materialFileMaxMb || fallback.uploads.materialFileMaxMb
+      materialFileMaxMb: raw.uploads?.materialFileMaxMb || fallback.uploads.materialFileMaxMb,
+      caseAttachmentMaxMb: raw.uploads?.caseAttachmentMaxMb || fallback.uploads.caseAttachmentMaxMb
     }
   };
 }

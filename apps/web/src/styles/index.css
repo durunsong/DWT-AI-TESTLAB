@@ -137,6 +137,131 @@
   .report-step-table__row--running > td:first-child {
     box-shadow: inset 3px 0 0 #3b82f6;
   }
+
+  .case-editor-drop-sense {
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 50% 44%, rgb(59 130 246 / 18%), transparent 38%),
+      rgb(15 23 42 / 62%);
+    backdrop-filter: blur(3px);
+    animation: case-editor-drop-backdrop 140ms ease-out both;
+  }
+
+  .case-editor-drop-sense__panel {
+    position: relative;
+    display: flex;
+    width: min(520px, 100%);
+    min-height: 210px;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid rgb(255 255 255 / 38%);
+    border-radius: 8px;
+    background: rgb(255 255 255 / 94%);
+    box-shadow: 0 24px 80px rgb(15 23 42 / 30%);
+    color: #0f172a;
+    text-align: center;
+    transform-origin: center;
+    animation: case-editor-drop-panel 180ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+  }
+
+  .case-editor-drop-sense__panel::before {
+    position: absolute;
+    inset: 14px;
+    border: 1px dashed rgb(37 99 235 / 48%);
+    border-radius: 7px;
+    content: "";
+  }
+
+  .case-editor-drop-sense__panel--ai::before {
+    border-color: rgb(16 185 129 / 52%);
+  }
+
+  .case-editor-drop-sense__icon {
+    margin-bottom: 18px;
+    color: #2563eb;
+    font-size: 52px;
+    animation: case-editor-drop-icon 920ms ease-in-out infinite;
+  }
+
+  .case-editor-drop-sense__panel--ai .case-editor-drop-sense__icon {
+    color: #059669;
+  }
+
+  .case-editor-drop-sense__line {
+    position: absolute;
+    right: 18px;
+    bottom: 18px;
+    left: 18px;
+    height: 3px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgb(37 99 235 / 12%);
+  }
+
+  .case-editor-drop-sense__line::before {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -36%;
+    width: 36%;
+    border-radius: inherit;
+    background: #2563eb;
+    content: "";
+    animation: case-editor-drop-line 1.05s ease-in-out infinite;
+  }
+
+  .case-editor-drop-sense__panel--ai .case-editor-drop-sense__line {
+    background: rgb(16 185 129 / 13%);
+  }
+
+  .case-editor-drop-sense__panel--ai .case-editor-drop-sense__line::before {
+    background: #059669;
+  }
+}
+
+@keyframes case-editor-drop-backdrop {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes case-editor-drop-panel {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes case-editor-drop-icon {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes case-editor-drop-line {
+  0% {
+    left: -36%;
+  }
+
+  100% {
+    left: 100%;
+  }
 }
 
 @keyframes ai-thinking-spin {

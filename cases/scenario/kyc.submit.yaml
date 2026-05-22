@@ -2,6 +2,9 @@ case_id: kyc_submit
 case_name: KYC 提交流程
 description: user 端进入 KYC 页面并提交企业认证。
 mode: web
+defaults:
+  step_timeout_ms: 20000
+  wait_for_network: true
 sessions:
   - name: user
     login_url: "${env.USER_LOGIN_URL}"

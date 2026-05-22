@@ -1,11 +1,14 @@
-import { useEffect, useState } from "react";
-import { Alert, Button, Card, Form, Input, Modal, Popconfirm, Radio, Space, Table, Tabs, Tag, Tooltip, Typography, Upload, message } from "antd";
+import { useEffect, useRef, useState } from "react";
+import { Alert, Button, Card, Checkbox, Form, Input, Modal, Popconfirm, Radio, Space, Table, Tabs, Tag, Tooltip, Typography, Upload, message } from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
   CloudUploadOutlined,
   DeleteOutlined,
   EditOutlined,
+  EyeOutlined,
+  FileImageOutlined,
+  PaperClipOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -13,6 +16,7 @@ import {
   UndoOutlined
 } from "@ant-design/icons";
 import type { UploadFile } from "antd";
+import type { RcFile } from "antd/es/upload";
 import { useNavigate } from "react-router-dom";
 import { generateMaterialCaseDraft } from "../../api/ai";
 import { deleteCase, importCaseYaml, listCases } from "../../api/cases";
@@ -23,7 +27,10 @@ import { useCaseStore } from "../../stores/useCaseStore";
 import { useRunStore } from "../../stores/useRunStore";
 import { useSettingStore } from "../../stores/useSettingStore";
 import type { CaseItem, CreateCaseInput, CreateCaseTemplate } from "../../types/case";
+import { cn } from "../../utils/cn";
 import type { ScenarioMode, ScenarioStep } from "@ai-e2e/shared";
+import { hasFileDrag } from "../CaseEditor/drag-upload";
+import { canAcceptCreateCaseMaterialDrop, createCaseMaterialDropCopy } from "./material-drop";
 
 interface CreateCaseFormValues {
   caseId: string;
@@ -208,11 +215,16 @@ export default function CaseList() {
   const [loading, setLoading] = useState(false);
   const [runningCaseId, setRunningCaseId] = useState("");
   const [deletingCaseId, setDeletingCaseId] = useState("");
+  const [deleteAttachmentsByCaseId, setDeleteAttachmentsByCaseId] = useState<Record<string, boolean>>({});
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createMode, setCreateMode] = useState<"template" | "ai">("template");
   const [templateSteps, setTemplateSteps] = useState<ScenarioStep[]>(() => cloneTemplateSteps("user_login"));
   const [materialFiles, setMaterialFiles] = useState<UploadFile[]>([]);
+  const [previewMaterial, setPreviewMaterial] = useState<{ name: string; dataUrl: string }>();
+  const [materialDropActive, setMaterialDropActive] = useState(false);
+  const materialDragDepthRef = useRef(0);
+  const materialDropCopy = materialDropActive ? createCaseMaterialDropCopy() : undefined;
 
   async function refresh() {
     setLoading(true);
@@ -228,6 +240,72 @@ export default function CaseList() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  useEffect(() => {
+    const canAcceptDrop = canAcceptCreateCaseMaterialDrop({ createOpen, createMode, creating });
+
+    const resetDragState = () => {
+      materialDragDepthRef.current = 0;
+      setMaterialDropActive(false);
+    };
+
+    const markDragState = (event: DragEvent) => {
+      if (!hasFileDrag(event.dataTransfer?.types)) {
+        return false;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = canAcceptDrop ? "copy" : "none";
+      }
+      setMaterialDropActive(canAcceptDrop);
+      return true;
+    };
+
+    const handleDragEnter = (event: DragEvent) => {
+      if (!markDragState(event)) return;
+      materialDragDepthRef.current += 1;
+    };
+
+    const handleDragOver = (event: DragEvent) => {
+      markDragState(event);
+    };
+
+    const handleDragLeave = (event: DragEvent) => {
+      if (!hasFileDrag(event.dataTransfer?.types)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      materialDragDepthRef.current = Math.max(0, materialDragDepthRef.current - 1);
+      if (materialDragDepthRef.current === 0) {
+        setMaterialDropActive(false);
+      }
+    };
+
+    const handleDrop = (event: DragEvent) => {
+      if (!hasFileDrag(event.dataTransfer?.types)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      resetDragState();
+      if (!canAcceptDrop || !files.length) {
+        return;
+      }
+
+      void appendDroppedMaterialFiles(files);
+    };
+
+    document.addEventListener("dragenter", handleDragEnter);
+    document.addEventListener("dragover", handleDragOver);
+    document.addEventListener("dragleave", handleDragLeave);
+    document.addEventListener("drop", handleDrop);
+    return () => {
+      document.removeEventListener("dragenter", handleDragEnter);
+      document.removeEventListener("dragover", handleDragOver);
+      document.removeEventListener("dragleave", handleDragLeave);
+      document.removeEventListener("drop", handleDrop);
+    };
+  }, [createMode, createOpen, creating, materialFiles]);
 
   async function runCase(caseId: string) {
     setRunningCaseId(caseId);
@@ -245,13 +323,21 @@ export default function CaseList() {
   async function removeCase(caseId: string) {
     setDeletingCaseId(caseId);
     try {
-      await deleteCase(caseId);
+      const result = await deleteCase(caseId, { deleteAttachments: deleteAttachmentsByCaseId[caseId] });
       messageApi.success("用例已删除");
+      if (result.attachmentsDeleted) {
+        messageApi.info(`已同步删除附件目录：${result.attachmentsDir ?? "-"}`);
+      }
       await refresh();
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : String(error));
     } finally {
       setDeletingCaseId("");
+      setDeleteAttachmentsByCaseId((current) => {
+        const next = { ...current };
+        delete next[caseId];
+        return next;
+      });
     }
   }
 
@@ -267,6 +353,7 @@ export default function CaseList() {
       docUrlsText: ""
     });
     setMaterialFiles([]);
+    setPreviewMaterial(undefined);
     setCreateMode("template");
     setTemplateSteps(cloneTemplateSteps("user_login"));
     setCreateOpen(true);
@@ -287,6 +374,7 @@ export default function CaseList() {
         : await createCaseByTemplate(values, payload.caseId);
       messageApi.success(createMode === "ai" ? "AI 用例已生成" : "用例已创建");
       setCreateOpen(false);
+      setPreviewMaterial(undefined);
       await refresh();
       navigate(`/cases/${created.caseId}`);
     } catch (error) {
@@ -338,6 +426,54 @@ export default function CaseList() {
     setTemplateSteps(cloneTemplateSteps(template));
   }
 
+  function handleMaterialBeforeUpload(file: RcFile) {
+    if (file.size > materialUploadMaxMb * 1024 * 1024) {
+      messageApi.error(`${file.name} 超过 ${materialUploadMaxMb}MB，请拆分或精简后再上传`);
+      return Upload.LIST_IGNORE;
+    }
+    return false;
+  }
+
+  function handleMaterialFilesChange(fileList: UploadFile[]) {
+    void hydrateMaterialFilePreviews(fileList);
+  }
+
+  async function appendDroppedMaterialFiles(files: File[]) {
+    const acceptedFiles = files
+      .map((file, index) => toMaterialUploadFile(file, index))
+      .filter((file) => handleMaterialBeforeUpload(file.originFileObj as RcFile) !== Upload.LIST_IGNORE);
+
+    if (!acceptedFiles.length) {
+      return;
+    }
+
+    await hydrateMaterialFilePreviews([...materialFiles, ...acceptedFiles]);
+  }
+
+  async function hydrateMaterialFilePreviews(fileList: UploadFile[]) {
+    const nextFiles = await Promise.all(fileList.map(async (file) => {
+      if (!isImageUploadFile(file) || file.thumbUrl || !file.originFileObj) {
+        return file;
+      }
+      return {
+        ...file,
+        thumbUrl: await readFileAsDataUrl(file.originFileObj)
+      };
+    }));
+    setMaterialFiles(nextFiles);
+  }
+
+  function removeMaterialFile(uid: string) {
+    setMaterialFiles((current) => current.filter((item) => item.uid !== uid));
+  }
+
+  async function openMaterialPreview(file: UploadFile) {
+    if (!isImageUploadFile(file)) return;
+    const dataUrl = file.thumbUrl || (file.originFileObj ? await readFileAsDataUrl(file.originFileObj) : "");
+    if (!dataUrl) return;
+    setPreviewMaterial({ name: file.name, dataUrl });
+  }
+
   function moveTemplateStep(index: number, offset: -1 | 1) {
     setTemplateSteps((current) => {
       const nextIndex = index + offset;
@@ -375,6 +511,20 @@ export default function CaseList() {
   return (
     <div className="flex min-h-full flex-col gap-2.5">
       {contextHolder}
+      {materialDropCopy ? (
+        <div className="case-editor-drop-sense fixed inset-0 z-[2147483000] flex items-center justify-center px-8">
+          <div className={cn("case-editor-drop-sense__panel", "case-editor-drop-sense__panel--ai")}>
+            <CloudUploadOutlined className="case-editor-drop-sense__icon" />
+            <Typography.Title level={3} className="!mb-2 !mt-0 !text-inherit">
+              {materialDropCopy.title}
+            </Typography.Title>
+            <Typography.Text className="!text-inherit">
+              {materialDropCopy.description}
+            </Typography.Text>
+            <div className="case-editor-drop-sense__line" />
+          </div>
+        </div>
+      ) : null}
       <PageHeader
         title="用例管理"
         description="读取 cases/scenario 下的 YAML 用例，支持查看、编辑和执行。"
@@ -469,7 +619,20 @@ export default function CaseList() {
                   </Button>
                   <Popconfirm
                     title="删除用例"
-                    description={`确定删除 ${record.caseId}.yaml？此操作不会删除历史报告。`}
+                    description={(
+                      <Space orientation="vertical" size={8}>
+                        <Typography.Text>{`确定删除 ${record.caseId}.yaml？此操作不会删除历史报告。`}</Typography.Text>
+                        <Checkbox
+                          checked={Boolean(deleteAttachmentsByCaseId[record.caseId])}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            setDeleteAttachmentsByCaseId((current) => ({ ...current, [record.caseId]: checked }));
+                          }}
+                        >
+                          同时删除该用例的上传附件/图片
+                        </Checkbox>
+                      </Space>
+                    )}
                     okText="删除"
                     cancelText="取消"
                     okButtonProps={{ danger: true, loading: deletingCaseId === record.caseId }}
@@ -672,11 +835,11 @@ export default function CaseList() {
               <Form.Item label="导入资料" extra={`支持 docx、PDF、Markdown、TXT、JSON、YAML，以及 PNG/JPG/WebP 图片；单文件最大 ${materialUploadMaxMb}MB。`}>
                 <Upload.Dragger
                   multiple
+                  showUploadList={false}
                   fileList={materialFiles}
                   accept=".docx,.pdf,.md,.markdown,.txt,.json,.yaml,.yml,.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
-                  beforeUpload={() => false}
-                  onChange={({ fileList }) => setMaterialFiles(fileList)}
-                  onRemove={(file) => setMaterialFiles((current) => current.filter((item) => item.uid !== file.uid))}
+                  beforeUpload={handleMaterialBeforeUpload}
+                  onChange={({ fileList }) => handleMaterialFilesChange(fileList)}
                 >
                   <p className="ant-upload-drag-icon">
                     <CloudUploadOutlined />
@@ -684,10 +847,70 @@ export default function CaseList() {
                   <p className="ant-upload-text">拖拽 PRD、PDF、docx 或图片到这里</p>
                   <p className="ant-upload-hint">AI 会读取文档文本，并直接理解页面截图、流程图、原型图中的信息。</p>
                 </Upload.Dragger>
+                {materialFiles.length ? (
+                  <div className="mt-3 rounded border border-slate-200 bg-white">
+                    <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
+                      <Typography.Text strong>已导入资料</Typography.Text>
+                      <Tag color="processing">{materialFiles.length} 个文件</Tag>
+                    </div>
+                    <div className="max-h-[220px] divide-y divide-slate-100 overflow-auto">
+                      {materialFiles.map((file) => {
+                        const image = isImageUploadFile(file);
+                        return (
+                          <div key={file.uid} className="flex items-center gap-3 px-3 py-2">
+                            {image ? (
+                              <button
+                                type="button"
+                                className="flex h-12 max-w-[128px] shrink-0 items-center justify-center overflow-hidden rounded border border-slate-200 bg-slate-50"
+                                title="预览图片"
+                                onClick={() => void openMaterialPreview(file)}
+                              >
+                                {file.thumbUrl ? (
+                                  <img src={file.thumbUrl} alt={file.name} className="h-full w-auto max-w-[128px] object-contain" />
+                                ) : (
+                                  <FileImageOutlined className="text-lg text-slate-400" />
+                                )}
+                              </button>
+                            ) : (
+                              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-50 text-slate-400">
+                                <PaperClipOutlined />
+                              </span>
+                            )}
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm text-slate-900" title={file.name}>{file.name}</span>
+                              <span className="block text-xs text-slate-500">{formatBytes(file.size ?? 0)}{file.type ? ` · ${file.type}` : ""}</span>
+                            </span>
+                            <Space size={2}>
+                              {image ? (
+                                <Button size="small" type="link" icon={<EyeOutlined />} onClick={() => void openMaterialPreview(file)}>
+                                  预览
+                                </Button>
+                              ) : null}
+                              <Button size="small" danger type="link" icon={<DeleteOutlined />} onClick={() => removeMaterialFile(file.uid)}>
+                                移除
+                              </Button>
+                            </Space>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
               </Form.Item>
             </div>
           ) : null}
         </Form>
+      </Modal>
+      <Modal
+        title={previewMaterial?.name ?? "图片预览"}
+        open={Boolean(previewMaterial)}
+        footer={null}
+        width={820}
+        onCancel={() => setPreviewMaterial(undefined)}
+      >
+        {previewMaterial ? (
+          <img src={previewMaterial.dataUrl} alt={previewMaterial.name} className="max-h-[70vh] w-full object-contain" />
+        ) : null}
       </Modal>
     </div>
   );
@@ -702,18 +925,46 @@ async function readUploadFileAsBase64(file: UploadFile): Promise<{ name: string;
     throw new Error(`${file.name} 超过 ${materialUploadMaxMb}MB，请拆分或精简后再上传`);
   }
 
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error(`${file.name} 文件读取失败`));
-    reader.readAsDataURL(rawFile);
-  });
+  const dataUrl = await readFileAsDataUrl(rawFile);
 
   return {
     name: file.name,
     mimeType: rawFile.type,
     base64: dataUrl.split(",", 2)[1] ?? ""
   };
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error(`${file.name} 文件读取失败`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function isImageUploadFile(file: UploadFile): boolean {
+  const mimeType = (file.type || file.originFileObj?.type || "").toLowerCase();
+  return mimeType.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(file.name);
+}
+
+function toMaterialUploadFile(file: File, index: number): UploadFile {
+  const rcFile = file as RcFile;
+  rcFile.uid = `${file.name}-${file.lastModified}-${index}`;
+  return {
+    uid: rcFile.uid,
+    name: file.name,
+    size: file.size,
+    type: file.type,
+    status: "done",
+    originFileObj: rcFile
+  };
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function normalizeCaseId(value?: string): string {

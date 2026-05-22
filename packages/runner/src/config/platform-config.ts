@@ -30,6 +30,7 @@ export interface PlatformConfig {
       height: number;
       minWidth: number;
       minHeight: number;
+      menuBarVisible: boolean;
     };
   };
   workspace: {
@@ -52,6 +53,8 @@ export interface PlatformConfig {
   uploads: {
     contextBodyLimitMb: number;
     materialFileMaxMb: number;
+    caseAttachmentMaxMb: number;
+    caseAttachmentBaseDir: string;
     materialSourceMaxChars: number;
     materialLinkMaxChars: number;
   };
@@ -83,7 +86,7 @@ export const defaultPlatformConfig: PlatformConfig = {
     host: "0.0.0.0",
     port: 4301,
     devApiProxyTarget: "http://localhost:4300",
-    requestTimeoutMs: 60_000,
+    requestTimeoutMs: 20_000,
     storageKey: "dwt-testing-settings"
   },
   desktop: {
@@ -97,7 +100,8 @@ export const defaultPlatformConfig: PlatformConfig = {
       width: 1440,
       height: 920,
       minWidth: 1280,
-      minHeight: 760
+      minHeight: 760,
+      menuBarVisible: true
     }
   },
   workspace: {
@@ -125,6 +129,8 @@ export const defaultPlatformConfig: PlatformConfig = {
   uploads: {
     contextBodyLimitMb: 5,
     materialFileMaxMb: 8,
+    caseAttachmentMaxMb: 20,
+    caseAttachmentBaseDir: "uploads/cases",
     materialSourceMaxChars: 18_000,
     materialLinkMaxChars: 24_000
   }
@@ -209,7 +215,8 @@ function mergePlatformConfig(input: Record<string, unknown>): PlatformConfig {
         width: numberValue(desktopWindow.width, defaultPlatformConfig.desktop.window.width),
         height: numberValue(desktopWindow.height, defaultPlatformConfig.desktop.window.height),
         minWidth: numberValue(desktopWindow.minWidth, defaultPlatformConfig.desktop.window.minWidth),
-        minHeight: numberValue(desktopWindow.minHeight, defaultPlatformConfig.desktop.window.minHeight)
+        minHeight: numberValue(desktopWindow.minHeight, defaultPlatformConfig.desktop.window.minHeight),
+        menuBarVisible: booleanValue(desktopWindow.menuBarVisible, defaultPlatformConfig.desktop.window.menuBarVisible)
       }
     },
     workspace: {
@@ -237,6 +244,8 @@ function mergePlatformConfig(input: Record<string, unknown>): PlatformConfig {
     uploads: {
       contextBodyLimitMb: numberValue(uploads.contextBodyLimitMb, defaultPlatformConfig.uploads.contextBodyLimitMb),
       materialFileMaxMb: numberValue(uploads.materialFileMaxMb, defaultPlatformConfig.uploads.materialFileMaxMb),
+      caseAttachmentMaxMb: numberValue(uploads.caseAttachmentMaxMb, defaultPlatformConfig.uploads.caseAttachmentMaxMb),
+      caseAttachmentBaseDir: stringValue(uploads.caseAttachmentBaseDir, defaultPlatformConfig.uploads.caseAttachmentBaseDir),
       materialSourceMaxChars: numberValue(uploads.materialSourceMaxChars, defaultPlatformConfig.uploads.materialSourceMaxChars),
       materialLinkMaxChars: numberValue(uploads.materialLinkMaxChars, defaultPlatformConfig.uploads.materialLinkMaxChars)
     }
@@ -254,6 +263,10 @@ function stringValue(value: unknown, fallback: string): string {
 function numberValue(value: unknown, fallback: number): number {
   const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
   return Number.isFinite(number) && number >= 0 ? number : fallback;
+}
+
+function booleanValue(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function stringArrayValue(value: unknown, fallback: string[]): string[] {

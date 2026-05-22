@@ -25,6 +25,7 @@ const defaultLimits: AiMaterialLimits = {
 };
 const textFilePattern = /\.(txt|md|markdown|csv|json|yaml|yml)$/i;
 const imageMimeTypes = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp"]);
+const materialLinkFetchTimeoutMs = 120_000;
 
 export async function extractMaterialFiles(files: AiMaterialFile[] = [], limits: AiMaterialLimits = defaultLimits): Promise<AiMaterialSource[]> {
   const sources: AiMaterialSource[] = [];
@@ -81,7 +82,7 @@ export async function fetchMaterialLinks(urls: string[] = [], limits: AiMaterial
         accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5",
         "user-agent": `${process.env.APP_PRODUCT_NAME || "Custom Test Platform"}-AI-Material-Importer/1.0`
       },
-      signal: AbortSignal.timeout(12_000)
+      signal: AbortSignal.timeout(materialLinkFetchTimeoutMs)
     });
 
     if (!response.ok) {
