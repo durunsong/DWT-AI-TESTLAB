@@ -78,6 +78,7 @@ export async function fetchMaterialLinks(urls: string[] = [], limits: AiMaterial
   for (const rawUrl of urls.map((item) => item.trim()).filter(Boolean)) {
     const url = assertPublicHttpUrl(rawUrl);
     const response = await fetch(url, {
+      redirect: "manual",
       headers: {
         accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5",
         "user-agent": `${process.env.APP_PRODUCT_NAME || "Custom Test Platform"}-AI-Material-Importer/1.0`
@@ -89,7 +90,7 @@ export async function fetchMaterialLinks(urls: string[] = [], limits: AiMaterial
       throw new Error(`文档链接读取失败：${url} HTTP ${response.status}`);
     }
 
-    const text = await response.text();
+    const text = await readLimitedResponseText(response, limits.materialLinkMaxChars);
     sources.push({
       title: `文档链接：${url}`,
       content: truncate(stripHtml(text), limits.materialLinkMaxChars)
@@ -131,7 +132,7 @@ function assertPublicHttpUrl(input: string): string {
     throw new Error(`仅支持 http/https 文档链接：${input}`);
   }
 
-  const hostname = url.hostname.toLowerCase();
+  const hostname = normalizeHostname(url.hostname);
   if (hostname === "localhost" || hostname.endsWith(".local")) {
     throw new Error(`不允许读取本机或内网文档链接：${input}`);
   }
@@ -144,6 +145,46 @@ function assertPublicHttpUrl(input: string): string {
   return url.toString();
 }
 
+async function readLimitedResponseText(response: Response, maxChars: number): Promise<string> {
+  const limit = Math.max(1, maxChars);
+  const contentLength = Number(response.headers.get("content-length") ?? NaN);
+  if (Number.isFinite(contentLength) && contentLength > limit) {
+    throw new Error(`文档链接内容超过 ${limit} 字符，请拆分或精简后再导入`);
+  }
+
+  if (!response.body) {
+    const text = await response.text();
+    if (text.length > limit) {
+      throw new Error(`文档链接内容超过 ${limit} 字符，请拆分或精简后再导入`);
+    }
+    return text;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    text += decoder.decode(value, { stream: true });
+    if (text.length > limit) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(`文档链接内容超过 ${limit} 字符，请拆分或精简后再导入`);
+    }
+  }
+  text += decoder.decode();
+  if (text.length > limit) {
+    throw new Error(`文档链接内容超过 ${limit} 字符，请拆分或精简后再导入`);
+  }
+  return text;
+}
+
+function normalizeHostname(hostname: string): string {
+  return hostname.toLowerCase().replace(/^\[|\]$/g, "");
+}
+
 function isPrivateIp(hostname: string): boolean {
   if (hostname === "127.0.0.1" || hostname === "0.0.0.0") return true;
   if (hostname.startsWith("10.")) return true;
@@ -151,6 +192,8 @@ function isPrivateIp(hostname: string): boolean {
   if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)) return true;
   if (hostname.startsWith("169.254.")) return true;
   if (hostname === "::1") return true;
+  if (/^f[cd][0-9a-f]{2}:/i.test(hostname)) return true;
+  if (/^fe80:/i.test(hostname)) return true;
   return false;
 }
 

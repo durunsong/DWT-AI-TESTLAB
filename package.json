@@ -3,7 +3,6 @@
   "version": "1.0.2",
   "private": false,
   "description": "Customizable AI-assisted E2E testing platform powered by TypeScript, Playwright, YAML DSL, Fastify, React and Electron.",
-  "license": "MIT",
   "keywords": [
     "e2e",
     "playwright",

@@ -1,18 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Card, Col, Empty, Modal, Row, Segmented, Space, Statistic, Table, Tag, Typography, message } from "antd";
-import { CopyOutlined, FileTextOutlined, FolderOpenOutlined } from "@ant-design/icons";
+import { CopyOutlined, FileTextOutlined, FolderOpenOutlined, RobotOutlined } from "@ant-design/icons";
 import { useParams, useSearchParams } from "react-router-dom";
 import { getTestRun, getTestRunLogs } from "../../api/testRuns";
-import { getTestRunReport } from "../../api/reports";
+import { getAiRunReport, getTestRunReport, listRunArtifactFiles } from "../../api/reports";
 import { PageHeader } from "../../components/PageHeader";
 import { LogTerminal } from "../../components/LogTerminal";
+import { MarkdownViewer } from "../../components/MarkdownViewer";
+import { TypewriterMarkdownViewer } from "../../components/TypewriterMarkdownViewer";
+import { SCREENSHOT_PREVIEW_MAX_HEIGHT_CLASS, SCREENSHOT_PREVIEW_MODAL_WIDTH } from "../../components/image-preview";
 import { useRunStore } from "../../stores/useRunStore";
-import type { RunReport } from "../../types/report";
+import type { AiAnalysisRecord, AiRunReport, DeveloperHandoffSummary, RunReport } from "../../types/report";
+import type { ArtifactFile } from "../../types/report";
 import type { StepResult } from "../../types/run";
 import { toArtifactUrl, toScreenshotUrl } from "../../utils/artifact-url";
 import { formatDuration, formatTime } from "../../utils/format";
-
-type ViewMode = "overview" | "html" | "json" | "screenshots" | "logs";
+import { readReportViewMode, type ReportViewMode } from "./report-view-mode";
 
 interface DetailPreview {
   title: string;
@@ -27,8 +30,10 @@ export default function ReportViewer() {
   const { run, setSummary, reset } = useRunStore();
   const runId = params.runId === "latest" ? "latest" : params.runId;
   const [report, setReport] = useState<RunReport>();
-  const [mode, setMode] = useState<ViewMode>(() => readViewMode(searchParams.get("mode")));
+  const [aiReport, setAiReport] = useState<AiRunReport | null>(null);
+  const [mode, setMode] = useState<ReportViewMode>(() => readReportViewMode(searchParams.get("mode")));
   const [logs, setLogs] = useState("");
+  const [traceFiles, setTraceFiles] = useState<ArtifactFile[]>([]);
   const [screenshotPreview, setScreenshotPreview] = useState<{ title: string; src: string }>();
   const [detailPreview, setDetailPreview] = useState<DetailPreview>();
   const [latestMissing, setLatestMissing] = useState(false);
@@ -36,7 +41,7 @@ export default function ReportViewer() {
   const displayJson = useMemo(() => truncateMiddle(fullJson, 140_000), [fullJson]);
 
   useEffect(() => {
-    setMode(readViewMode(searchParams.get("mode")));
+    setMode(readReportViewMode(searchParams.get("mode")));
   }, [searchParams]);
 
   useEffect(() => {
@@ -44,7 +49,9 @@ export default function ReportViewer() {
     let canceled = false;
     setLatestMissing(false);
     setReport(undefined);
+    setAiReport(null);
     setLogs("");
+    setTraceFiles([]);
 
     async function loadReport() {
       try {
@@ -59,17 +66,21 @@ export default function ReportViewer() {
         }
 
         setSummary(summary);
-        const [nextReport, nextLogs] = await Promise.all([
+        const [nextReport, nextAiReport, nextLogs, nextTraceFiles] = await Promise.all([
           getTestRunReport(summary.runId).catch((error) => {
             const errorMessage = error instanceof Error ? error.message : String(error);
             messageApi.warning(errorMessage);
             return null;
           }),
-          getTestRunLogs(summary.runId).catch(() => "")
+          getAiRunReport(summary.runId).catch(() => null),
+          getTestRunLogs(summary.runId).catch(() => ""),
+          listRunArtifactFiles("traces", summary.runId).catch(() => [])
         ]);
         if (canceled) return;
         setReport(nextReport ?? undefined);
+        setAiReport(nextAiReport);
         setLogs(nextLogs);
+        setTraceFiles(nextTraceFiles);
       } catch (error) {
         if (canceled) return;
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -100,11 +111,14 @@ export default function ReportViewer() {
   }
 
   const failedScreenshots = (report?.steps ?? run?.steps ?? []).filter((step) => step.screenshot);
+  const traceSteps = (report?.steps ?? run?.steps ?? []).filter((step) => step.trace);
   const summary = report ?? run;
   const steps = report?.steps ?? run?.steps ?? [];
   const failureSummary = report?.failureSummary;
+  const developerSummary = report?.developerSummary;
+  const aiAnalyses = aiReport?.analyses ?? [];
 
-  function changeMode(nextMode: ViewMode) {
+  function changeMode(nextMode: ReportViewMode) {
     setMode(nextMode);
     setSearchParams(nextMode === "overview" ? {} : { mode: nextMode }, { replace: true });
   }
@@ -126,14 +140,16 @@ export default function ReportViewer() {
         title="报告查看"
         description={summary?.runId ?? runId}
         extra={
-          <Segmented<ViewMode>
+          <Segmented<ReportViewMode>
             value={mode}
             options={[
               { label: "概览", value: "overview" },
               { label: "HTML", value: "html" },
               { label: "JSON", value: "json" },
               { label: "截图", value: "screenshots" },
-              { label: "日志", value: "logs" }
+              { label: "AI 分析", value: "ai-analysis" },
+              { label: "日志", value: "logs" },
+              { label: "Trace", value: "traces" }
             ]}
             onChange={changeMode}
           />
@@ -153,10 +169,13 @@ export default function ReportViewer() {
           <Button icon={<FolderOpenOutlined />} type={mode === "screenshots" ? "primary" : "default"} disabled={!failedScreenshots.length} onClick={() => changeMode("screenshots")}>
             失败截图
           </Button>
+          <Button icon={<RobotOutlined />} type={mode === "ai-analysis" ? "primary" : "default"} disabled={!aiAnalyses.length} onClick={() => changeMode("ai-analysis")}>
+            AI 分析
+          </Button>
           <Button icon={<FileTextOutlined />} type={mode === "logs" ? "primary" : "default"} disabled={!logs} onClick={() => changeMode("logs")}>
             运行日志
           </Button>
-          <Button icon={<FolderOpenOutlined />} disabled onClick={() => messageApi.info("Trace 在线预览暂未接入，请从本地产物目录查看。")}>
+          <Button icon={<FolderOpenOutlined />} type={mode === "traces" ? "primary" : "default"} disabled={!traceSteps.length && !traceFiles.length} onClick={() => changeMode("traces")}>
             Trace
           </Button>
         </Space>
@@ -191,6 +210,14 @@ export default function ReportViewer() {
                 </Row>
               </div>
               <div className="grid gap-[10px]">
+                {developerSummary ? (
+                  <DeveloperSummaryCard
+                    summary={developerSummary}
+                    onCopy={(content) => void copyText(content, "开发处理摘要已复制")}
+                    onOpenDetail={openDetail}
+                    onPreviewScreenshot={(title, src) => setScreenshotPreview({ title, src })}
+                  />
+                ) : null}
                 {failureSummary ? (
                   <Alert type="error" showIcon title="失败摘要" description={failureSummary} />
                 ) : null}
@@ -334,18 +361,79 @@ export default function ReportViewer() {
             ]}
           />
         ) : null}
+        {mode === "ai-analysis" ? (
+          aiAnalyses.length ? (
+            <div className="grid gap-2.5">
+              {aiAnalyses.map((analysis) => (
+                <AiAnalysisPanel
+                  key={`${analysis.stepId}-${analysis.source}`}
+                  analysis={analysis}
+                  onCopy={(content) => void copyText(content, "AI 分析已复制")}
+                  onPreviewScreenshot={(title, src) => setScreenshotPreview({ title, src })}
+                />
+              ))}
+            </div>
+          ) : (
+            <Empty description="暂无 AI 分析报告" />
+          )
+        ) : null}
+        {mode === "traces" ? traceSteps.length ? (
+          <Table<StepResult>
+            rowKey="stepId"
+            dataSource={traceSteps}
+            pagination={false}
+            scroll={{ x: 760 }}
+            columns={[
+              { title: "步骤", dataIndex: "stepId" },
+              { title: "名称", dataIndex: "name" },
+              { title: "状态", dataIndex: "status", width: 100, render: (status) => <Tag color={status === "failed" ? "error" : "default"}>{status}</Tag> },
+              { title: "开始时间", dataIndex: "startedAt", width: 120, render: formatTime },
+              { title: "耗时", dataIndex: "durationMs", width: 100, render: formatDuration },
+              {
+                title: "Trace",
+                dataIndex: "trace",
+                render: (href) =>
+                  href ? (
+                    <Typography.Text className="!font-mono !text-xs" copyable={{ text: href }}>
+                      {href}
+                    </Typography.Text>
+                  ) : "-"
+              }
+            ]}
+          />
+        ) : (
+          <Table<ArtifactFile>
+            rowKey="path"
+            dataSource={traceFiles}
+            pagination={false}
+            scroll={{ x: 760 }}
+            columns={[
+              { title: "文件名", dataIndex: "name" },
+              { title: "大小", dataIndex: "sizeBytes", width: 120, render: formatBytes },
+              {
+                title: "Trace",
+                dataIndex: "path",
+                render: (href) => (
+                  <Button type="link" size="small" href={toArtifactUrl(href)} target="_blank" rel="noreferrer">
+                    打开
+                  </Button>
+                )
+              }
+            ]}
+          />
+        ) : null}
         {mode === "logs" ? <LogTerminal logs={logs} heightClassName="h-[560px]" /> : null}
       </Card>
       <Modal
         title={screenshotPreview ? `失败截图：${screenshotPreview.title}` : "失败截图"}
         open={Boolean(screenshotPreview)}
-        width="86vw"
+        width={SCREENSHOT_PREVIEW_MODAL_WIDTH}
         footer={null}
         destroyOnHidden
         onCancel={() => setScreenshotPreview(undefined)}
       >
         {screenshotPreview ? (
-          <div className="max-h-[72vh] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className={`${SCREENSHOT_PREVIEW_MAX_HEIGHT_CLASS} overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3`}>
             <img src={screenshotPreview.src} alt={screenshotPreview.title} className="mx-auto max-w-full rounded bg-white shadow-sm" />
           </div>
         ) : null}
@@ -406,6 +494,151 @@ function StepStatusBadge({ status }: { status: string }) {
   );
 }
 
+function AiAnalysisPanel({
+  analysis,
+  onCopy,
+  onPreviewScreenshot
+}: {
+  analysis: AiAnalysisRecord;
+  onCopy: (content: string) => void;
+  onPreviewScreenshot: (title: string, src: string) => void;
+}) {
+  const title = analysis.stepName ? `${analysis.stepName} / ${analysis.stepId}` : analysis.stepId;
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2.5">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <RobotOutlined className="text-blue-600" />
+            <Typography.Text strong className="!text-base">{title}</Typography.Text>
+            <Tag color={analysis.source === "auto_failure" ? "blue" : "purple"}>{analysisSourceText(analysis.source)}</Tag>
+            <Tag color={analysis.status === "completed" ? "success" : "error"}>{analysis.status === "completed" ? "已完成" : "失败"}</Tag>
+          </div>
+          <Typography.Text type="secondary" className="!mt-1 !block !text-xs">
+            {analysis.generatedAt ? `生成时间：${formatTime(analysis.generatedAt)}` : ""}
+          </Typography.Text>
+        </div>
+        <Space>
+          {analysis.screenshot ? (
+            <Button size="small" onClick={() => onPreviewScreenshot(analysis.stepId, toScreenshotUrl(analysis.screenshot!))}>
+              查看截图
+            </Button>
+          ) : null}
+          <Button size="small" icon={<CopyOutlined />} disabled={!analysis.content} onClick={() => onCopy(analysis.content ?? "")}>
+            复制
+          </Button>
+        </Space>
+      </div>
+      {analysis.status === "completed" && analysis.content ? (
+        <TypewriterMarkdownViewer
+          content={analysis.content}
+          className="max-h-[420px] min-h-[180px] overflow-auto rounded-lg bg-slate-950 p-4"
+          onCopyCode={onCopy}
+        />
+      ) : (
+        <Alert type="warning" showIcon title="AI 分析失败" description={analysis.error ?? "未返回分析结果"} />
+      )}
+    </div>
+  );
+}
+
+function analysisSourceText(source: AiAnalysisRecord["source"]): string {
+  return source === "auto_failure" ? "自动失败分析" : "手动截图分析";
+}
+
+function DeveloperSummaryCard({
+  summary,
+  onCopy,
+  onOpenDetail,
+  onPreviewScreenshot
+}: {
+  summary: DeveloperHandoffSummary;
+  onCopy: (content: string) => void;
+  onOpenDetail: (title: string, content: string, danger?: boolean) => void;
+  onPreviewScreenshot: (title: string, src: string) => void;
+}) {
+  const copyText = [
+    "开发处理摘要",
+    `归因建议：${summary.title}`,
+    `建议处理人：${ownerHintText(summary.ownerHint)}`,
+    `失败步骤：${summary.failedStepId} / ${summary.failedStepName} / ${summary.failedStepType}`,
+    `建议动作：${summary.suggestedAction}`,
+    "",
+    "关键证据：",
+    ...summary.evidence.map((item) => `- ${item}`),
+    "",
+    "复现方式：",
+    ...summary.reproduce.map((item) => `- ${item}`)
+  ].join("\n");
+  return (
+    <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Typography.Text strong className="!text-base">开发处理摘要</Typography.Text>
+            <Tag color={ownerHintColor(summary.ownerHint)}>{ownerHintText(summary.ownerHint)}</Tag>
+            <Tag>{categoryText(summary.category)}</Tag>
+          </div>
+          <Typography.Text className="!mt-1 !block !text-slate-700">{summary.title}</Typography.Text>
+        </div>
+        <Space>
+          {summary.relatedArtifacts.screenshot ? (
+            <Button size="small" onClick={() => onPreviewScreenshot(summary.failedStepId, toScreenshotUrl(summary.relatedArtifacts.screenshot!))}>
+              查看截图
+            </Button>
+          ) : null}
+          <Button size="small" icon={<CopyOutlined />} onClick={() => onCopy(copyText)}>
+            复制摘要
+          </Button>
+        </Space>
+      </div>
+      <Row gutter={[10, 10]}>
+        <Col xs={24} xl={12}>
+          <div className="h-full rounded-md border border-blue-100 bg-white p-3">
+            <Typography.Text strong>关键证据</Typography.Text>
+            <ul className="mb-0 mt-2 space-y-1 pl-5 text-sm text-slate-700">
+              {summary.evidence.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
+            </ul>
+          </div>
+        </Col>
+        <Col xs={24} xl={12}>
+          <div className="h-full rounded-md border border-blue-100 bg-white p-3">
+            <Typography.Text strong>复现与建议</Typography.Text>
+            <ul className="mb-2 mt-2 space-y-1 pl-5 text-sm text-slate-700">
+              {summary.reproduce.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
+            </ul>
+            <Typography.Paragraph className="!mb-0 !text-sm !text-slate-700">{summary.suggestedAction}</Typography.Paragraph>
+          </div>
+        </Col>
+      </Row>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {summary.relatedArtifacts.log ? <Button size="small" onClick={() => onOpenDetail("日志文件", summary.relatedArtifacts.log ?? "")}>日志路径</Button> : null}
+        {summary.relatedArtifacts.trace ? <Button size="small" onClick={() => onOpenDetail("Trace 文件", summary.relatedArtifacts.trace ?? "")}>Trace 路径</Button> : null}
+        {summary.relatedArtifacts.jsonReport ? <Button size="small" onClick={() => onOpenDetail("JSON 报告", summary.relatedArtifacts.jsonReport ?? "")}>JSON 路径</Button> : null}
+      </div>
+    </div>
+  );
+}
+
+function ownerHintText(owner: DeveloperHandoffSummary["ownerHint"]): string {
+  return ({ frontend: "前端开发", backend: "后端开发", test: "测试/自动化", environment: "环境/数据负责人", unknown: "待确认" } as Record<DeveloperHandoffSummary["ownerHint"], string>)[owner];
+}
+
+function ownerHintColor(owner: DeveloperHandoffSummary["ownerHint"]): string {
+  return ({ frontend: "cyan", backend: "geekblue", test: "purple", environment: "orange", unknown: "default" } as Record<DeveloperHandoffSummary["ownerHint"], string>)[owner];
+}
+
+function categoryText(category: DeveloperHandoffSummary["category"]): string {
+  return ({
+    api_business_failure: "接口/业务返回",
+    locator_or_ui_change: "页面/定位",
+    assertion_failure: "断言",
+    environment_or_data: "环境/数据",
+    automation_runtime: "运行器",
+    unknown: "待确认"
+  } as Record<DeveloperHandoffSummary["category"], string>)[category];
+}
+
 function renderDetailCell(props: { content: string; empty: boolean; danger?: boolean; onOpen: () => void }) {
   if (props.empty) {
     return <span className="text-slate-400">-</span>;
@@ -453,6 +686,13 @@ function truncateMiddle(content: string, maxChars: number): string {
   ].join("\n");
 }
 
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value)) return "-";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
 function statusBadgeClass(status: string): string {
   if (status === "passed") return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
   if (status === "failed") return "bg-red-50 text-red-700 ring-1 ring-red-200";
@@ -474,11 +714,6 @@ function stepIndexClass(status: string): string {
   if (status === "failed") return `${base} bg-red-50 text-red-700`;
   if (status === "running") return `${base} bg-blue-50 text-blue-700`;
   return `${base} bg-slate-100 text-slate-500`;
-}
-
-function readViewMode(mode: string | null): ViewMode {
-  if (mode === "html" || mode === "json" || mode === "screenshots" || mode === "logs") return mode;
-  return "overview";
 }
 
 function isNoHistoryError(message: string): boolean {

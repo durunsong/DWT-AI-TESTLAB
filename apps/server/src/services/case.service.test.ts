@@ -397,6 +397,29 @@ test("deletes one case attachment by safe relative path", async () => {
   await assert.rejects(() => fs.stat(attachmentPath));
 });
 
+test("reads one case attachment by safe relative path", async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "dwt-case-attachment-read-"));
+  const attachmentDir = path.join(rootDir, "uploads", "cases", "admin_zilkiaoxiugai001");
+  await fs.mkdir(attachmentDir, { recursive: true });
+  await fs.writeFile(path.join(attachmentDir, "license.pdf"), "pdf-content", "utf8");
+
+  const service = new CaseService({} as ScenarioOrchestrator, rootDir);
+  const result = await service.readAttachment("uploads/cases/admin_zilkiaoxiugai001/license.pdf");
+
+  assert.equal(result.name, "license.pdf");
+  assert.equal(result.file, "uploads/cases/admin_zilkiaoxiugai001/license.pdf");
+  assert.equal(result.content.toString("utf8"), "pdf-content");
+});
+
+test("rejects reading files outside case attachment directory", async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "dwt-case-attachment-read-outside-"));
+  await fs.writeFile(path.join(rootDir, "secret.txt"), "secret", "utf8");
+
+  const service = new CaseService({} as ScenarioOrchestrator, rootDir);
+
+  await assert.rejects(() => service.readAttachment("secret.txt"), /附件文件路径非法/);
+});
+
 test("searches case attachment files and folders safely", async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "dwt-case-attachment-search-"));
   const caseDir = path.join(rootDir, "uploads", "cases", "admin_zilkiaoxiugai001");

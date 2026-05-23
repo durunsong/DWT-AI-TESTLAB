@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Card, Col, Empty, Modal, Row, Space, Table, Tag, Tooltip, Typography, message } from "antd";
 import { CopyOutlined, RobotOutlined } from "@ant-design/icons";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { analyzeScreenshotStream } from "../../api/ai";
+import { analyzeScreenshot } from "../../api/ai";
 import { AiThinking } from "../../components/AiThinking";
 import { eventSourceUrl, getTestRun, getTestRunLogs } from "../../api/testRuns";
 import { LogTerminal } from "../../components/LogTerminal";
@@ -11,6 +11,8 @@ import { PageHeader } from "../../components/PageHeader";
 import { ReportLinks } from "../../components/ReportLinks";
 import { RunStatusCard } from "../../components/RunStatusCard";
 import { StepTimeline } from "../../components/StepTimeline";
+import { TypewriterMarkdownViewer } from "../../components/TypewriterMarkdownViewer";
+import { SCREENSHOT_PREVIEW_MAX_HEIGHT_CLASS, SCREENSHOT_PREVIEW_MODAL_WIDTH } from "../../components/image-preview";
 import { useRunStore } from "../../stores/useRunStore";
 import type { StepResult, TestRunEvent } from "../../types/run";
 import { toScreenshotUrl } from "../../utils/artifact-url";
@@ -36,7 +38,8 @@ export default function RunDetail() {
   const [detailPreview, setDetailPreview] = useState<DetailPreview>();
   const [runLoadError, setRunLoadError] = useState("");
   const [latestMissing, setLatestMissing] = useState(false);
-  const aiStreamFrameRef = useRef<number | null>(null);
+  const pendingStepRef = useRef<StepResult | undefined>(undefined);
+  const stepUpdateFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!runId) return;
@@ -85,18 +88,45 @@ export default function RunDetail() {
   useEffect(() => {
     if (!runId || run?.status !== "running") return;
     const source = new EventSource(eventSourceUrl(runId));
+    const flushStepUpdate = () => {
+      stepUpdateFrameRef.current = null;
+      if (pendingStepRef.current) {
+        updateStep(pendingStepRef.current);
+        pendingStepRef.current = undefined;
+      }
+    };
     source.addEventListener("step_updated", (event) => {
       const payload = JSON.parse((event as MessageEvent).data) as TestRunEvent;
-      if (payload.step) updateStep(payload.step);
+      if (payload.step) {
+        pendingStepRef.current = payload.step;
+        if (!stepUpdateFrameRef.current) {
+          stepUpdateFrameRef.current = window.requestAnimationFrame(flushStepUpdate);
+        }
+      }
     });
     source.addEventListener("run_finished", (event) => {
       const payload = JSON.parse((event as MessageEvent).data) as TestRunEvent;
+      if (stepUpdateFrameRef.current) {
+        window.cancelAnimationFrame(stepUpdateFrameRef.current);
+        stepUpdateFrameRef.current = null;
+      }
+      if (pendingStepRef.current) {
+        updateStep(pendingStepRef.current);
+        pendingStepRef.current = undefined;
+      }
       setRun({ status: payload.status === "failed" ? "failed" : "passed" });
       getTestRun(runId).then((nextRun) => nextRun && setSummary(nextRun)).catch(() => undefined);
       getTestRunLogs(runId).then(setLogs).catch(() => undefined);
       source.close();
     });
-    return () => source.close();
+    return () => {
+      if (stepUpdateFrameRef.current) {
+        window.cancelAnimationFrame(stepUpdateFrameRef.current);
+        stepUpdateFrameRef.current = null;
+      }
+      pendingStepRef.current = undefined;
+      source.close();
+    };
   }, [run?.status, runId, setLogs, setRun, setSummary, updateStep]);
 
   const data = useMemo(() => run?.steps ?? [], [run?.steps]);
@@ -108,42 +138,11 @@ export default function RunDetail() {
     setAiModalOpen(true);
     setAiLoadingStep(step.stepId);
     setAiAnalysis("");
-    let bufferedAnalysis = "";
-    let streamError: Error | undefined;
-    const flushAnalysis = () => {
-      aiStreamFrameRef.current = null;
-      setAiAnalysis(bufferedAnalysis);
-    };
     try {
-      await analyzeScreenshotStream(
-        { screenshotPath: step.screenshot, stepId: step.stepId, error: step.error },
-        {
-          onChunk: (chunk) => {
-            bufferedAnalysis += chunk;
-            if (!aiStreamFrameRef.current) {
-              aiStreamFrameRef.current = window.requestAnimationFrame(flushAnalysis);
-            }
-          },
-          onError: (error) => {
-            streamError = error;
-          }
-        }
-      );
-      if (aiStreamFrameRef.current) {
-        window.cancelAnimationFrame(aiStreamFrameRef.current);
-        aiStreamFrameRef.current = null;
-      }
-      setAiAnalysis(bufferedAnalysis);
-      if (streamError) {
-        throw streamError;
-      }
+      setAiAnalysis(await analyzeScreenshot({ screenshotPath: step.screenshot, runId: run?.runId, stepId: step.stepId, error: step.error }));
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : String(error));
     } finally {
-      if (aiStreamFrameRef.current) {
-        window.cancelAnimationFrame(aiStreamFrameRef.current);
-        aiStreamFrameRef.current = null;
-      }
       setAiLoadingStep("");
     }
   }
@@ -232,11 +231,20 @@ export default function RunDetail() {
                 }
               >
                 {failureAnalysisStep.aiAnalysis?.status === "pending" ? (
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                    <AiThinking />
+                  <div className="max-h-[460px] min-h-[300px] overflow-auto rounded-lg bg-slate-950 p-5">
+                    <div className="mb-2.5 rounded-lg border border-slate-700 bg-slate-900 px-4 py-3">
+                      <AiThinking />
+                    </div>
+                    {failureAnalysisStep.aiAnalysis.content ? (
+                      <MarkdownViewer
+                        content={failureAnalysisStep.aiAnalysis.content}
+                        className="max-h-none min-h-0 overflow-visible rounded-none bg-transparent p-0"
+                        onCopyCode={(code) => void copyText(code, "代码块已复制")}
+                      />
+                    ) : null}
                   </div>
                 ) : failureAnalysisStep.aiAnalysis?.status === "completed" && failureAnalysisStep.aiAnalysis.content ? (
-                  <MarkdownViewer
+                  <TypewriterMarkdownViewer
                     content={failureAnalysisStep.aiAnalysis.content}
                     className="max-h-[460px] min-h-[300px] overflow-auto rounded-lg bg-slate-950 p-5"
                     onCopyCode={(code) => void copyText(code, "代码块已复制")}
@@ -360,7 +368,7 @@ export default function RunDetail() {
             </div>
           ) : null}
           {aiAnalysis ? (
-            <MarkdownViewer
+            <TypewriterMarkdownViewer
               content={aiAnalysis}
               className="max-h-none min-h-0 overflow-visible rounded-none bg-transparent p-0"
               onCopyCode={(code) => void copyText(code, "代码块已复制")}
@@ -373,13 +381,13 @@ export default function RunDetail() {
       <Modal
         title={screenshotPreview ? `失败截图：${screenshotPreview.title}` : "失败截图"}
         open={Boolean(screenshotPreview)}
-        width="86vw"
+        width={SCREENSHOT_PREVIEW_MODAL_WIDTH}
         footer={null}
         destroyOnHidden
         onCancel={() => setScreenshotPreview(undefined)}
       >
         {screenshotPreview ? (
-          <div className="max-h-[72vh] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className={`${SCREENSHOT_PREVIEW_MAX_HEIGHT_CLASS} overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3`}>
             <img src={screenshotPreview.src} alt={screenshotPreview.title} className="mx-auto max-w-full rounded bg-white shadow-sm" />
           </div>
         ) : null}

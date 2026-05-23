@@ -48,6 +48,12 @@ export interface DeleteAttachmentResult {
   file: string;
 }
 
+export interface ReadAttachmentResult {
+  name: string;
+  file: string;
+  content: Buffer;
+}
+
 export interface SearchCaseAttachmentsInput {
   caseId?: string;
   query?: string;
@@ -59,6 +65,23 @@ export interface CaseAttachmentSearchResult {
   name: string;
   file: string;
   sizeBytes?: number;
+}
+
+export interface SharedAbilityParam {
+  name: string;
+  required?: boolean;
+  defaultValue?: string;
+  description?: string;
+}
+
+export interface SharedAbility {
+  sharedId: string;
+  name: string;
+  description?: string;
+  tags: string[];
+  params: SharedAbilityParam[];
+  stepCount: number;
+  file: string;
 }
 
 export class CaseService {
@@ -91,6 +114,12 @@ export class CaseService {
     );
 
     return cases.sort((a, b) => a.caseId.localeCompare(b.caseId));
+  }
+
+  async listSharedAbilities(): Promise<SharedAbility[]> {
+    const files = await this.listSharedAbilityFiles();
+    const abilities = await Promise.all(files.map((filePath) => this.readSharedAbility(filePath)));
+    return abilities.sort((left, right) => left.sharedId.localeCompare(right.sharedId));
   }
 
   async getCase(caseId: string) {
@@ -396,6 +425,21 @@ export class CaseService {
     };
   }
 
+  async readAttachment(file: string): Promise<ReadAttachmentResult> {
+    const baseDir = this.attachmentBaseDir();
+    const filePath = path.resolve(this.rootDir, file);
+    this.assertInside(filePath, baseDir, "附件文件路径非法");
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) {
+      throw new Error("附件文件路径非法");
+    }
+    return {
+      name: path.basename(filePath),
+      file: this.relativePath(filePath),
+      content: await fs.readFile(filePath)
+    };
+  }
+
   async searchAttachments(input: SearchCaseAttachmentsInput = {}): Promise<CaseAttachmentSearchResult[]> {
     const query = (input.query ?? "").trim().toLowerCase();
     const limit = Math.max(1, Math.min(input.limit ?? 200, 500));
@@ -485,6 +529,85 @@ export class CaseService {
 
   private scenarioDir(): string {
     return path.resolve(this.rootDir, "cases", "scenario");
+  }
+
+  private sharedDir(): string {
+    return path.resolve(this.rootDir, "cases", "shared");
+  }
+
+  private async listSharedAbilityFiles(): Promise<string[]> {
+    const sharedDir = this.sharedDir();
+    const files: string[] = [];
+    await this.walkSharedAbilityFiles(sharedDir, files);
+    return files;
+  }
+
+  private async walkSharedAbilityFiles(currentDir: string, files: string[]): Promise<void> {
+    const entries = await fs.readdir(currentDir, { withFileTypes: true }).catch((error: unknown) => {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    });
+
+    for (const entry of entries) {
+      const entryPath = path.resolve(currentDir, entry.name);
+      this.assertInside(entryPath, this.sharedDir(), "共享能力路径非法");
+      if (entry.isDirectory()) {
+        await this.walkSharedAbilityFiles(entryPath, files);
+      } else if (entry.isFile() && /\.(ya?ml)$/i.test(entry.name)) {
+        files.push(entryPath);
+      }
+    }
+  }
+
+  private async readSharedAbility(filePath: string): Promise<SharedAbility> {
+    const raw = YAML.parse(await fs.readFile(filePath, "utf8")) as unknown;
+    const record = this.isRecord(raw) ? raw : {};
+    const relativeFile = this.relativePath(filePath);
+    const fallbackId = relativeFile
+      .replace(/^cases\/shared\//, "")
+      .replace(/\.(ya?ml)$/i, "");
+    const sharedId = this.stringValue(record.shared_id) || this.stringValue(record.sharedId) || fallbackId;
+
+    return {
+      sharedId,
+      name: this.stringValue(record.name) || sharedId,
+      description: this.stringValue(record.description) || undefined,
+      tags: this.normalizeSharedTags(record.tags),
+      params: this.normalizeSharedParams(record.params),
+      stepCount: this.countSharedSteps(record),
+      file: relativeFile
+    };
+  }
+
+  private normalizeSharedTags(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.map((item) => this.stringValue(item)).filter(Boolean);
+  }
+
+  private normalizeSharedParams(value: unknown): SharedAbilityParam[] {
+    if (!this.isRecord(value)) {
+      return [];
+    }
+    return Object.entries(value).map(([name, rawDefinition]) => {
+      const definition = this.isRecord(rawDefinition) ? rawDefinition : {};
+      return {
+        name,
+        required: definition.required === true || undefined,
+        defaultValue: this.stringValue(definition.default) || undefined,
+        description: this.stringValue(definition.description) || undefined
+      };
+    });
+  }
+
+  private countSharedSteps(template: Record<string, unknown>): number {
+    const directSteps = Array.isArray(template.steps) ? template.steps.length : 0;
+    const phases = this.isRecord(template.phases) ? template.phases : {};
+    const phaseSteps = Object.values(phases).reduce<number>((total, value) => total + (Array.isArray(value) ? value.length : 0), 0);
+    return directSteps + phaseSteps;
   }
 
   private attachmentBaseDir(): string {

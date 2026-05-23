@@ -14,6 +14,24 @@ mainSteps:
       url: "${session.login_url}"
 ```
 
+Web 控制台的新增用例弹窗会读取 `cases/shared/**/*.yaml` 作为“复用能力”。AI 资料生成时可以勾选这些能力，生成结果会优先输出 `use` / `with` 引用，而不是重复展开登录、KYC 提交、后台审核等通用步骤。共享能力文件建议包含：
+
+```yaml
+shared_id: common/web_login
+name: 登录复用流程
+description: 打开登录页并执行登录
+tags: [login]
+params:
+  session:
+    required: true
+steps:
+  - step_id: open_login
+    name: 打开登录页
+    type: web_open
+    session: "${session}"
+    url: "${session.login_url}"
+```
+
 P0 支持页面流程步骤：`web_open`、`web_reload`、`web_input`、`web_select`、`web_click`、`web_upload`、`web_wait_text`、`web_wait_element`、`web_assert_text`、`web_assert_visible`、`web_assert_url`、`web_extract`、`web_screenshot`、`flow_login`、`flow_submit_kyc`、`flow_admin_approve_kyc`。
 
 变量支持 `${env.KEY}`、`${session.login_url}`、`${session.username}`、`${session.password}`、`${var.name}`、`${timestamp}` 和 `${runId}`。缺失变量会直接报错并阻止执行。

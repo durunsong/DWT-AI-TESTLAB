@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import Fastify, { type FastifyInstance } from "fastify";
 import { loadPlatformConfig, type PlatformConfig, ScenarioOrchestrator } from "@ai-e2e/runner";
 import { registerAiRoutes } from "./routes/ai.routes";
+import { registerAiReportRoutes } from "./routes/ai-reports.routes";
 import { registerCaseRoutes } from "./routes/cases.routes";
 import { registerDbRoutes } from "./routes/db.routes";
 import { registerAppContextRoutes } from "./routes/app-context.routes";
@@ -16,6 +17,7 @@ import { AppContextService } from "./services/app-context.service";
 import { EnvConfigService } from "./services/env-config.service";
 import { ReportService } from "./services/report.service";
 import { TestRunService } from "./services/test-run.service";
+import { AiReportService } from "./services/ai-report.service";
 
 export interface CreateServerOptions {
   rootDir: string;
@@ -49,7 +51,8 @@ export async function createServer(options: CreateServerOptions): Promise<Fastif
   const runner = new ScenarioOrchestrator(rootDir);
   const envConfigService = new EnvConfigService(rootDir);
   const caseService = new CaseService(runner, rootDir, envConfigService, platformConfig);
-  const testRunService = new TestRunService(runner, rootDir, envConfigService, platformConfig);
+  const aiReportService = new AiReportService(rootDir);
+  const testRunService = new TestRunService(runner, rootDir, envConfigService, platformConfig, aiReportService);
   const reportService = new ReportService(rootDir, platformConfig);
   const appContextService = new AppContextService(rootDir, platformConfig);
   const dbService = new DbService();
@@ -57,7 +60,8 @@ export async function createServer(options: CreateServerOptions): Promise<Fastif
   await registerCaseRoutes(app, caseService, platformConfig);
   await registerTestRunRoutes(app, testRunService, reportService);
   await registerTestRunEventRoutes(app, testRunService);
-  await registerAiRoutes(app, rootDir, platformConfig);
+  await registerAiReportRoutes(app, aiReportService);
+  await registerAiRoutes(app, rootDir, platformConfig, aiReportService);
   await registerAppContextRoutes(app, appContextService);
   await registerDbRoutes(app, dbService);
   await registerSettingsRoutes(app, envConfigService);
@@ -110,8 +114,13 @@ function registerCors(app: FastifyInstance, allowedOrigins: PlatformConfig["serv
   app.addHook("onRequest", (request, reply, done) => {
     const origin = request.headers.origin;
     const allowedOrigin = resolveCorsOrigin(typeof origin === "string" ? origin : undefined, allowedOrigins);
+    if (origin && !allowedOrigin) {
+      reply.status(403).send({ code: 1, message: "Origin 不允许访问本地测试服务", data: null });
+      return;
+    }
     if (allowedOrigin) {
       reply.header("Access-Control-Allow-Origin", allowedOrigin);
+      reply.header("Vary", "Origin");
     }
     reply.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
     reply.header("Access-Control-Allow-Headers", "content-type,authorization");

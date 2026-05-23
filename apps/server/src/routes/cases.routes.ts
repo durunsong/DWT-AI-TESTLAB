@@ -8,6 +8,8 @@ export async function registerCaseRoutes(app: FastifyInstance, caseService: Case
 
   app.get("/api/cases", async () => ok(await caseService.listCases()));
 
+  app.get("/api/cases/shared-abilities", async () => ok(await caseService.listSharedAbilities()));
+
   app.post<{
     Body: {
       caseId: string;
@@ -52,6 +54,15 @@ export async function registerCaseRoutes(app: FastifyInstance, caseService: Case
     }));
   });
 
+  app.get<{ Querystring: { file: string; download?: string } }>("/api/cases/attachments/file", async (request, reply) => {
+    const attachment = await caseService.readAttachment(request.query.file);
+    if (request.query.download === "true") {
+      reply.header("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(attachment.name)}`);
+    }
+    reply.type(contentTypeByFileName(attachment.name));
+    return attachment.content;
+  });
+
   app.get<{ Params: { caseId: string } }>("/api/cases/:caseId/attachments", async (request) => {
     return ok(await caseService.listAttachments(request.params.caseId));
   });
@@ -85,4 +96,15 @@ export async function registerCaseRoutes(app: FastifyInstance, caseService: Case
   app.post<{ Body: { content: string } }>("/api/cases/validate", async (request) => {
     return ok(await caseService.validateContentForRun(request.body.content));
   });
+}
+
+function contentTypeByFileName(fileName: string): string {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".svg")) return "image/svg+xml";
+  if (lower.endsWith(".pdf")) return "application/pdf";
+  return "application/octet-stream";
 }

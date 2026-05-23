@@ -4,9 +4,9 @@
     "productName": "DWT Testing"
   },
   "server": {
-    "host": "0.0.0.0",
+    "host": "127.0.0.1",
     "port": 4300,
-    "corsOrigins": ["*"]
+    "corsOrigins": ["http://127.0.0.1:4301", "http://localhost:4301"]
   },
   "web": {
     "host": "0.0.0.0",

@@ -124,11 +124,14 @@ export async function getDbHealth(): Promise<DbHealthResult> {
 }
 
 export async function analyzeScreenshot(input: { screenshotPath: string; stepId?: string; error?: string }): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT_MS);
   return request<{ content: string }>("/ai/analyze-screenshot", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(input)
-  }).then((result) => result.content);
+    body: JSON.stringify(input),
+    signal: controller.signal
+  }).then((result) => result.content).finally(() => window.clearTimeout(timeoutId));
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -140,3 +143,4 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return payload.data;
 }
 import { apiUrl } from "./base-url";
+import { AI_REQUEST_TIMEOUT_MS } from "./timeouts";

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AI_MATERIAL_DRAFT_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS } from "./timeouts";
+import { AI_REQUEST_OPTIONS, AI_REQUEST_TIMEOUT_MS, DEFAULT_REQUEST_TIMEOUT_MS } from "./timeouts";
 
-test("keeps normal requests short and allows AI material draft to run longer", () => {
+test("keeps normal requests short and gives AI requests a 60s timeout", () => {
   assert.equal(DEFAULT_REQUEST_TIMEOUT_MS, 20_000);
-  assert.equal(AI_MATERIAL_DRAFT_TIMEOUT_MS, 120_000);
+  assert.equal(AI_REQUEST_TIMEOUT_MS, 60_000);
+  assert.equal(AI_REQUEST_OPTIONS.timeout, 60_000);
 });

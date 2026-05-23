@@ -26,6 +26,7 @@ export class HtmlReportBuilder {
       .status{display:inline-flex;align-items:center;border:1px solid #dbe3ef;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:700}.status-passed{border-color:#86efac;background:#f0fdf4;color:#15803d}.status-failed{border-color:#fecaca;background:#fef2f2;color:#b91c1c}.status-running{border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8}.status-skipped,.status-pending{background:#f8fafc;color:#64748b}
       .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:18px}.stat{border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;padding:10px 12px}.stat span{display:block;color:var(--muted);font-size:12px}.stat strong{display:block;margin-top:4px;font-size:20px;line-height:1.2}
       .failure-summary{margin-top:12px;border:1px solid #fecaca;border-radius:8px;background:#fff1f2;padding:10px 12px;color:#991b1b;white-space:pre-wrap;overflow-wrap:anywhere}
+      .dev-summary{margin-top:14px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;padding:14px 16px}.dev-summary h2{margin:0 0 8px;font-size:17px}.dev-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.dev-item{border:1px solid #dbeafe;border-radius:7px;background:#fff;padding:8px 10px}.dev-item span{display:block;color:#64748b;font-size:12px}.dev-item strong{display:block;margin-top:2px;color:#0f172a}.dev-list{margin:8px 0 0;padding-left:18px;color:#334155}
       .table-card{margin-top:16px;padding:14px 16px 16px}.table-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.table-title h2{margin:0;font-size:17px}.table-wrap{overflow:auto;border:1px solid #e5e7eb;border-radius:8px}
       table{width:100%;min-width:1360px;border-collapse:collapse;table-layout:fixed}th,td{border-bottom:1px solid #edf1f7;padding:11px 12px;text-align:left;vertical-align:top;overflow-wrap:anywhere}th{position:sticky;top:0;z-index:1;background:#f8fafc;color:#475569;font-size:12px;font-weight:700}.index-cell{color:#64748b;width:54px}code{border-radius:5px;background:#eef2f7;padding:2px 5px;color:#0f172a;font-family:"SFMono-Regular",Consolas,monospace;font-size:12px}.soft-pill{display:inline-flex;border-radius:6px;background:#eef2ff;padding:2px 7px;color:#3730a3;font-size:12px}
       .row-passed{background:#f0fdf4}.row-failed{background:#fff1f2}.row-skipped{background:#fff}.error-cell{color:#b91c1c}.data-cell{color:#475569}.detail-cell{display:flex;max-width:100%;align-items:center;gap:8px;font:12px/1.5 "SFMono-Regular",Consolas,monospace}.detail-preview{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.detail-button{flex:0 0 auto;border:0;background:transparent;color:#2563eb;cursor:pointer;font:12px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:0}.detail-button:hover{text-decoration:underline}.empty-cell{color:#94a3b8}
@@ -34,7 +35,7 @@ export class HtmlReportBuilder {
       @media (max-width:1100px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
       </style></head>
       <body><main class="page"><section class="hero"><div class="hero-head"><div class="title"><h1>${escapeHtml(safeReport.caseName)}</h1><p class="meta">runId: ${escapeHtml(safeReport.runId)} · env: ${escapeHtml(safeReport.env)}</p></div><span class="status status-${safeReport.status}">${escapeHtml(statusText(safeReport.status))}</span></div>
-      <div class="stats"><div class="stat"><span>总步骤</span><strong>${safeReport.total}</strong></div><div class="stat"><span>成功</span><strong>${safeReport.passed}</strong></div><div class="stat"><span>失败</span><strong>${safeReport.failed}</strong></div><div class="stat"><span>跳过</span><strong>${safeReport.skipped}</strong></div></div>${safeReport.failureSummary ? `<div class="failure-summary">${escapeHtml(safeReport.failureSummary)}</div>` : ""}</section>
+      <div class="stats"><div class="stat"><span>总步骤</span><strong>${safeReport.total}</strong></div><div class="stat"><span>成功</span><strong>${safeReport.passed}</strong></div><div class="stat"><span>失败</span><strong>${safeReport.failed}</strong></div><div class="stat"><span>跳过</span><strong>${safeReport.skipped}</strong></div></div>${renderDeveloperSummary(safeReport)}${safeReport.failureSummary ? `<div class="failure-summary">${escapeHtml(safeReport.failureSummary)}</div>` : ""}</section>
       <section class="table-card"><div class="table-title"><h2>步骤明细</h2><span class="meta">${safeReport.endedAt ? escapeHtml(safeReport.endedAt) : ""}</span></div>
       <div class="table-wrap"><table><colgroup><col class="c-index"><col class="c-step"><col class="c-name"><col class="c-type"><col class="c-session"><col class="c-status"><col class="c-duration"><col class="c-data"><col class="c-error"></colgroup><thead><tr><th>#</th><th>stepId</th><th>名称</th><th>类型</th><th>会话</th><th>状态</th><th>耗时</th><th>数据</th><th>错误</th></tr></thead><tbody>${rows}</tbody></table></div></section></main>
       <div class="modal-mask" id="detailModalMask" aria-hidden="true" inert><section class="modal" id="detailModal" role="dialog" aria-modal="true" aria-labelledby="detailModalTitle"><div class="modal-head"><h3 class="modal-title" id="detailModalTitle">详情</h3><button class="modal-close" type="button" id="detailModalClose">关闭</button></div><div class="modal-body"><pre id="detailModalContent"></pre></div></section></div>
@@ -84,6 +85,28 @@ export class HtmlReportBuilder {
       "utf8"
     );
   }
+}
+
+function renderDeveloperSummary(report: RunReport): string {
+  const summary = report.developerSummary;
+  if (!summary) {
+    return "";
+  }
+  const evidence = summary.evidence.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  const reproduce = summary.reproduce.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  return `<section class="dev-summary"><h2>开发处理摘要</h2><div class="dev-grid">
+    <div class="dev-item"><span>归因建议</span><strong>${escapeHtml(summary.title)}</strong></div>
+    <div class="dev-item"><span>建议处理人</span><strong>${escapeHtml(ownerText(summary.ownerHint))}</strong></div>
+    <div class="dev-item"><span>失败步骤</span><strong>${escapeHtml(summary.failedStepId)} / ${escapeHtml(summary.failedStepType)}</strong></div>
+    <div class="dev-item"><span>建议动作</span><strong>${escapeHtml(summary.suggestedAction)}</strong></div>
+  </div><div class="dev-grid" style="margin-top:8px">
+    <div class="dev-item"><span>关键证据</span><ul class="dev-list">${evidence}</ul></div>
+    <div class="dev-item"><span>复现方式</span><ul class="dev-list">${reproduce}</ul></div>
+  </div></section>`;
+}
+
+function ownerText(owner: string): string {
+  return ({ frontend: "前端开发", backend: "后端开发", test: "测试/自动化", environment: "环境/数据负责人", unknown: "待确认" } as Record<string, string>)[owner] ?? owner;
 }
 
 function renderStepRow(step: RunReport["steps"][number], index: number, details: DetailEntry[]): string {

@@ -31,6 +31,8 @@ export interface ApiResponseDiagnostic {
   failed?: boolean;
   failureReason?: string;
   contentType?: string;
+  requestPostData?: string;
+  requestJson?: unknown;
   bodyText?: string;
   bodyJson?: unknown;
   matchedAt: string;

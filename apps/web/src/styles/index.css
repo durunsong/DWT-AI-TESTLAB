@@ -109,6 +109,35 @@
     animation-delay: 0.32s;
   }
 
+  .typewriter-markdown {
+    position: relative;
+  }
+
+  .typewriter-markdown--typing {
+    min-height: 1em;
+  }
+
+  .typewriter-caret {
+    display: inline-block;
+    width: 1px;
+    height: 1em;
+    margin-left: 2px;
+    vertical-align: -0.12em;
+    background: currentColor;
+    animation: typewriter-caret-blink 0.8s steps(1) infinite;
+  }
+
+  .typewriter-caret--markdown {
+    position: absolute;
+    right: 18px;
+    bottom: 18px;
+    color: #e2e8f0;
+  }
+
+  .typewriter-caret--mono {
+    color: #e2e8f0;
+  }
+
   .report-step-table .ant-table {
     background: #fff;
   }
@@ -298,5 +327,17 @@
   40% {
     opacity: 0.9;
     transform: translateY(-3px);
+  }
+}
+
+@keyframes typewriter-caret-blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+
+  51%,
+  100% {
+    opacity: 0;
   }
 }

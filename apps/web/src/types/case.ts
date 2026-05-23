@@ -84,6 +84,23 @@ export interface CaseAttachmentSearchResult {
   sizeBytes?: number;
 }
 
+export interface SharedAbilityParam {
+  name: string;
+  required?: boolean;
+  defaultValue?: string;
+  description?: string;
+}
+
+export interface SharedAbility {
+  sharedId: string;
+  name: string;
+  description?: string;
+  tags: string[];
+  params: SharedAbilityParam[];
+  stepCount: number;
+  file: string;
+}
+
 export interface DeleteAttachmentResult {
   deleted: boolean;
   file: string;

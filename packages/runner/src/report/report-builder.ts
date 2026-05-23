@@ -2,6 +2,7 @@ import type { RunReport, StepResult } from "@ai-e2e/shared";
 import type { ArtifactPaths } from "../utils/artifact";
 import { HtmlReportBuilder } from "./html-report-builder";
 import { JsonReportBuilder } from "./json-report-builder";
+import { buildDeveloperHandoffSummary } from "./developer-summary";
 
 export class ReportBuilder {
   private readonly json = new JsonReportBuilder();
@@ -19,6 +20,7 @@ export class ReportBuilder {
     artifacts: ArtifactPaths;
   }): Promise<RunReport> {
     const durationMs = input.endedAt ? new Date(input.endedAt).getTime() - new Date(input.startedAt).getTime() : undefined;
+    const failedStep = input.steps.find((step) => step.status === "failed");
     const report: RunReport = {
       runId: input.runId,
       caseId: input.caseId,
@@ -40,7 +42,14 @@ export class ReportBuilder {
         screenshotsDir: input.artifacts.screenshotsDir,
         tracesDir: input.artifacts.tracesDir
       },
-      failureSummary: input.steps.find((step) => step.status === "failed")?.error
+      failureSummary: failedStep?.error,
+      developerSummary: buildDeveloperHandoffSummary({
+        runId: input.runId,
+        caseId: input.caseId,
+        env: input.env,
+        failedStep,
+        artifacts: input.artifacts
+      })
     };
 
     await this.json.write(input.artifacts.jsonReport, report);

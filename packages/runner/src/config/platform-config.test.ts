@@ -3,7 +3,15 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { loadPlatformConfig, resolveArtifactBaseDir } from "./platform-config";
+import { defaultPlatformConfig, loadPlatformConfig, resolveArtifactBaseDir } from "./platform-config";
+
+test("defaults to loopback-only server exposure", () => {
+  assert.equal(defaultPlatformConfig.server.host, "127.0.0.1");
+  assert.deepEqual(defaultPlatformConfig.server.corsOrigins, [
+    "http://127.0.0.1:4301",
+    "http://localhost:4301"
+  ]);
+});
 
 test("loads configurable platform fields with defaults", async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "dwt-platform-config-"));

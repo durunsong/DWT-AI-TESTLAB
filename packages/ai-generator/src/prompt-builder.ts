@@ -19,6 +19,16 @@ export interface MaterialCaseGenerationPromptInput {
   templateHint?: string;
   requirement?: string;
   materials: Array<{ title: string; content: string }>;
+  sharedAbilities?: MaterialSharedAbility[];
+}
+
+export interface MaterialSharedAbility {
+  sharedId: string;
+  name: string;
+  description?: string;
+  params: Array<{ name: string; required?: boolean; defaultValue?: string; description?: string }>;
+  stepCount: number;
+  file: string;
 }
 
 export function buildMaterialCaseGenerationPrompt(input: MaterialCaseGenerationPromptInput): string {
@@ -28,6 +38,7 @@ export function buildMaterialCaseGenerationPrompt(input: MaterialCaseGenerationP
       item.content
     ].join("\n")).join("\n\n")
     : "无补充资料";
+  const sharedAbilities = buildSharedAbilityPromptBlock(input.sharedAbilities ?? []);
 
   return [
     `你是 ${appProductName()} 的自动化测试 DSL 生成器。`,
@@ -57,6 +68,13 @@ export function buildMaterialCaseGenerationPrompt(input: MaterialCaseGenerationP
     "URL 优先使用 ${session.login_url}；admin hash 路由页面使用形如 ${session.login_url}#/admin/sys/perinfo，避免拼出双斜杠。",
     "admin 个人信息/修改资料场景必须在登录后直接 web_open 到 ${session.login_url}#/admin/sys/perinfo，不要通过点击“系统”“个人信息”菜单进入；字段 target 优先使用 login.admin.yaml 中的 admin_profile_username、admin_profile_password、admin_profile_save、admin_profile_success_message。",
     "admin 个人信息/修改资料若资料或附件要求上传头像，必须在 click_save/admin_profile_save 前新增 web_upload，target 使用 admin_avatar_upload，file 使用给定项目相对路径；不要在缺少 file 的情况下生成头像上传步骤。",
+    "如果下方提供了可复用能力，且业务语义匹配，优先在 beforeActions/mainSteps/assertions/afterActions 中用 use 和 with 引用它们，不要重复展开内部步骤。",
+    "引用可复用能力示例：",
+    "mainSteps:",
+    "  - use: common/web_login",
+    "    with:",
+    "      session: user",
+    "      url: \"${session.login_url}\"",
     "若资料缺少页面定位细节，优先生成可编辑的流程骨架，并使用已有 locations.file：user 登录用 cases/location/login.user.yaml，admin 登录用 cases/location/login.admin.yaml，KYC 流程用 cases/location/kyc.submit-and-approve.yaml。",
     "最小结构示例：",
     "case_id: example_case",
@@ -80,9 +98,42 @@ export function buildMaterialCaseGenerationPrompt(input: MaterialCaseGenerationP
     `说明：${input.description || "无"}`,
     `模板倾向：${input.templateHint || "由资料判断"}`,
     `用户补充要求：${input.requirement || "无"}`,
+    "可复用能力：",
+    sharedAbilities,
     "资料内容：",
     materials
   ].join("\n");
+}
+
+function buildSharedAbilityPromptBlock(abilities: MaterialSharedAbility[]): string {
+  if (!abilities.length) {
+    return "无";
+  }
+
+  return abilities.map((ability) => {
+    const params = ability.params.length
+      ? ability.params.map((param) => {
+        const flags = [
+          param.required ? "required" : "",
+          param.defaultValue ? `default=${param.defaultValue}` : "",
+          param.description || ""
+        ].filter(Boolean).join(", ");
+        return `    - ${param.name}${flags ? ` (${flags})` : ""}`;
+      }).join("\n")
+      : "    - 无";
+
+    return [
+      `- ${ability.sharedId}（${ability.name}）`,
+      `  文件：${ability.file}`,
+      ability.description ? `  说明：${ability.description}` : undefined,
+      `  步骤数：${ability.stepCount}`,
+      "  参数：",
+      params,
+      "  引用方式：",
+      `    - use: ${ability.sharedId}`,
+      "      with:"
+    ].filter(Boolean).join("\n");
+  }).join("\n");
 }
 
 export function buildLocationGenerationPrompt(pageDescription: string): string {

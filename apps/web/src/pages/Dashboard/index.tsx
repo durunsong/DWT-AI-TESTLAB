@@ -3,7 +3,6 @@ import { Alert, Card, Col, Row, Space, Tabs, Tag, message } from "antd";
 import { useNavigate } from "react-router-dom";
 import { getAppContext, getDbHealth } from "../../api/context";
 import { listCases } from "../../api/cases";
-import { listRunHistory } from "../../api/reports";
 import { createTestRun, getTestRun, getTestRunLogs } from "../../api/testRuns";
 import { EnvSelector } from "../../components/EnvSelector";
 import { LogTerminal } from "../../components/LogTerminal";
@@ -32,31 +31,6 @@ export default function Dashboard() {
     getAppContext().then(setContext).catch(() => undefined);
     getDbHealth().then(setDbHealth).catch(() => undefined);
   }, [messageApi, setCases]);
-
-  useEffect(() => {
-    if (run) return;
-    let canceled = false;
-
-    listRunHistory()
-      .then((history) => {
-        if (canceled) return;
-        const latest = history[0];
-        if (!latest) {
-          return undefined;
-        }
-        return getTestRun(latest.runId);
-      })
-      .then((latestRun) => {
-        if (!canceled && latestRun) {
-          setSummary(latestRun);
-        }
-      })
-      .catch(() => undefined);
-
-    return () => {
-      canceled = true;
-    };
-  }, [run, setSummary]);
 
   useEffect(() => {
     if (!run?.runId || logs.length) return;

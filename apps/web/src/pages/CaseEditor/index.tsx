@@ -1,19 +1,25 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Checkbox, Col, Drawer, Form, Input, Modal, Row, Segmented, Select, Space, Spin, Tag, Typography, Upload, message } from "antd";
+import { Alert, Button, Card, Checkbox, Col, Drawer, Form, Input, Modal, Row, Segmented, Select, Space, Spin, Tag, Tooltip, Typography, Upload, message } from "antd";
 import type { RcFile } from "antd/es/upload";
-import { ArrowLeftOutlined, CheckCircleOutlined, CopyOutlined, DeleteOutlined, EyeOutlined, FolderOpenOutlined, PaperClipOutlined, PlayCircleOutlined, RobotOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, CheckCircleOutlined, CopyOutlined, DeleteOutlined, DownloadOutlined, EyeOutlined, FolderOpenOutlined, LinkOutlined, PaperClipOutlined, PlayCircleOutlined, RobotOutlined, SafetyCertificateOutlined, SaveOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
 import { useNavigate, useParams } from "react-router-dom";
-import { assistCaseYamlStream, type AiMaterialFileInput, type CaseYamlAssistMode } from "../../api/ai";
-import { deleteCaseAttachment, getCase, listCaseAttachments, normalizeCaseYaml, preflightCaseContent, saveCase, searchCaseAttachments, uploadCaseAttachment, validateCase } from "../../api/cases";
+import { assistCaseYaml, type AiMaterialFileInput, type CaseYamlAssistMode } from "../../api/ai";
+import { caseAttachmentFileUrl, deleteCaseAttachment, getCase, listCaseAttachments, normalizeCaseYaml, preflightCaseContent, saveCase, searchCaseAttachments, uploadCaseAttachment, validateCase } from "../../api/cases";
 import { createTestRun } from "../../api/testRuns";
+import { AiThinking } from "../../components/AiThinking";
+import { IMAGE_PREVIEW_MAX_HEIGHT_CLASS, IMAGE_PREVIEW_MODAL_WIDTH } from "../../components/image-preview";
 import { PageHeader } from "../../components/PageHeader";
 import { YamlEditor } from "../../components/YamlEditor";
 import { useCaseStore } from "../../stores/useCaseStore";
 import { useSettingStore } from "../../stores/useSettingStore";
 import type { CaseAttachmentResult, CaseAttachmentSearchResult, CasePreflightResult, CaseValidationResult } from "../../types/case";
 import { cn } from "../../utils/cn";
+import { playTypewriterText } from "../../utils/typewriter-text";
 import { appendInstructionBlock, buildAttachmentAiPrompt, buildAttachmentBatchAiPrompt, collectUploadSteps, filterNewAttachmentSearchResults, insertUploadStepBeforeSubmit, isImageAttachmentFile, upsertUploadStepFile, type AttachmentPromptFile, type UploadStepOption } from "./attachment-prompt";
+import { primaryAttachmentViewAction } from "./attachment-actions";
+import { aiYamlPreviewPlaceholder } from "./ai-preview-copy";
 import { caseEditorDropCopy, hasFileDrag, resolveCaseEditorDropTarget, type CaseEditorDropTarget } from "./drag-upload";
+import { runCaseAfterSave } from "./run-flow";
 
 const attachmentUploadMaxMb = Number(import.meta.env.VITE_APP_CASE_ATTACHMENT_MAX_MB || 20);
 const aiMaterialUploadMaxMb = Number(import.meta.env.VITE_APP_UPLOAD_MAX_MB || 8);
@@ -47,6 +53,11 @@ interface AiInstructionAttachmentItem {
   previewUrl?: string;
 }
 
+interface ImagePreviewItem {
+  name: string;
+  previewUrl: string;
+}
+
 export default function CaseEditor() {
   const { caseId = "" } = useParams();
   const navigate = useNavigate();
@@ -63,6 +74,7 @@ export default function CaseEditor() {
   const [aiInstruction, setAiInstruction] = useState("");
   const [aiDraft, setAiDraft] = useState("");
   const [aiStreaming, setAiStreaming] = useState(false);
+  const [aiTyping, setAiTyping] = useState(false);
   const [aiValidation, setAiValidation] = useState<CaseValidationResult>();
   const [aiError, setAiError] = useState("");
   const [attachmentUploading, setAttachmentUploading] = useState(false);
@@ -76,7 +88,7 @@ export default function CaseEditor() {
   const [attachmentSearchResults, setAttachmentSearchResults] = useState<CaseAttachmentSearchResult[]>([]);
   const [selectedPromptFiles, setSelectedPromptFiles] = useState<Record<string, AttachmentPromptFile>>({});
   const [aiInstructionAttachments, setAiInstructionAttachments] = useState<AiInstructionAttachmentItem[]>([]);
-  const [previewAttachment, setPreviewAttachment] = useState<AiInstructionAttachmentItem>();
+  const [previewAttachment, setPreviewAttachment] = useState<ImagePreviewItem>();
   const [pageDropTarget, setPageDropTarget] = useState<CaseEditorDropTarget>();
   const dragDepthRef = useRef(0);
   const uploadSteps = collectUploadSteps(yaml);
@@ -202,6 +214,20 @@ export default function CaseEditor() {
     }
   }
 
+  async function saveCurrentCaseForRun(): Promise<{ saved: boolean }> {
+    setSaving(true);
+    try {
+      const result = await saveCase(caseId, yaml);
+      setValidation(result.validation);
+      if (result.saved) {
+        messageApi.success("保存成功，准备执行");
+      }
+      return { saved: result.saved };
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handlePreflight(): Promise<CasePreflightResult | undefined> {
     setPreflighting(true);
     try {
@@ -232,20 +258,33 @@ export default function CaseEditor() {
   async function handleRun() {
     setRunning(true);
     try {
-      const validationResult = await validateCase(yaml);
-      setValidation(validationResult);
-      if (!validationResult.valid) {
+      const result = await runCaseAfterSave({
+        validate: async () => {
+          const validationResult = await validateCase(yaml);
+          setValidation(validationResult);
+          return { valid: validationResult.valid };
+        },
+        save: saveCurrentCaseForRun,
+        preflight: async () => {
+          const preflightResult = await handlePreflight();
+          return preflightResult ? { runnable: preflightResult.runnable } : undefined;
+        },
+        start: () => createTestRun({ caseId, env })
+      });
+
+      if (result.status === "validation_failed") {
         messageApi.error("DSL 校验失败，请先修复后再执行");
         return;
       }
-
-      const preflightResult = await handlePreflight();
-      if (!preflightResult?.runnable) {
+      if (result.status === "save_failed") {
+        messageApi.error("保存失败，请先修复校验问题后再执行");
+        return;
+      }
+      if (result.status === "preflight_failed") {
         messageApi.error("运行前预检未通过，请先修复错误后再执行");
         return;
       }
 
-      const result = await createTestRun({ caseId, env });
       navigate(`/runs/${result.runId}`);
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : String(error));
@@ -270,31 +309,23 @@ export default function CaseEditor() {
     setAiValidation(undefined);
     setAiError("");
 
-    let nextDraft = "";
-    let streamError: Error | undefined;
     try {
-      await assistCaseYamlStream(
-        {
-          mode: aiMode,
-          caseId,
-          currentYaml: yaml,
-          instruction: aiInstruction,
-          validationIssues: validation?.issues,
-          files: aiInstructionAttachments.map(aiInstructionAttachmentToFile)
-        },
-        {
-          onChunk: (chunk) => {
-            nextDraft += chunk;
-            setAiDraft(nextDraft);
-          },
-          onError: (error) => {
-            streamError = error;
-          }
-        }
-      );
-      if (streamError) throw streamError;
+      const generated = await assistCaseYaml({
+        mode: aiMode,
+        caseId,
+        currentYaml: yaml,
+        instruction: aiInstruction,
+        validationIssues: validation?.issues,
+        files: aiInstructionAttachments.map(aiInstructionAttachmentToFile)
+      });
+      const typing = playTypewriterText(generated, {
+        maxCharsPerTick: 14,
+        onTypingChange: setAiTyping,
+        onUpdate: setAiDraft
+      });
+      await typing.done;
 
-      const normalized = await normalizeCaseYaml(normalizeAiYaml(nextDraft));
+      const normalized = await normalizeCaseYaml(normalizeAiYaml(generated));
       setAiDraft(normalized);
       const result = await validateCase(normalized);
       setAiValidation(result);
@@ -308,6 +339,7 @@ export default function CaseEditor() {
       setAiError(message);
       messageApi.error(message);
     } finally {
+      setAiTyping(false);
       setAiStreaming(false);
     }
   }
@@ -405,6 +437,13 @@ export default function CaseEditor() {
   async function copyAttachmentPath(file: string) {
     await navigator.clipboard.writeText(file);
     messageApi.success("附件路径已复制");
+  }
+
+  function previewCaseAttachment(file: string, name = attachmentFileName(file)) {
+    setPreviewAttachment({
+      name,
+      previewUrl: caseAttachmentFileUrl(file)
+    });
   }
 
   async function deleteAttachment(file: string) {
@@ -729,26 +768,40 @@ export default function CaseEditor() {
               {visibleAttachments.length ? (
                 <div className="max-h-[260px] divide-y divide-slate-100 overflow-auto rounded border border-slate-100">
                   {visibleAttachments.map((item) => (
-                    <div key={item.file} className="flex items-center justify-between gap-2 px-2 py-2 text-sm">
+                    <div key={item.file} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-2 py-2 text-sm">
                       <Checkbox
                         checked={Boolean(selectedPromptFiles[item.file])}
                         onChange={(event) => togglePromptFile(attachmentToPromptFile(item), event.target.checked)}
                       />
-                      <span className="min-w-0 flex-1 truncate" title={item.file}>
-                        <PaperClipOutlined className="mr-1 text-slate-400" />
-                        {item.file}
+                      <span className="min-w-0" title={item.file}>
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <PaperClipOutlined className="shrink-0 text-slate-400" />
+                          <span className="truncate font-mono text-xs text-slate-700">{item.name || attachmentFileName(item.file)}</span>
+                        </span>
+                        <span className="mt-0.5 block truncate text-[11px] text-slate-400">{item.file}</span>
                       </span>
-                      <Space size={4}>
-                        <Button size="small" onClick={() => void copyAttachmentPath(item.file)}>
-                          复制
-                        </Button>
-                        <Button size="small" type="link" disabled={!effectiveUploadStepId} onClick={() => applyAttachment(item.file)}>
-                          引用
-                        </Button>
-                        <Button size="small" type="link" onClick={() => openAttachmentPrompt(item)}>
-                          提示词
-                        </Button>
-                        <Button size="small" danger type="link" title="删除附件" icon={<DeleteOutlined />} onClick={() => void deleteAttachment(item.file)} />
+                      <Space size={0} className="shrink-0">
+                        {primaryAttachmentViewAction(item) === "preview" ? (
+                          <Tooltip title="预览">
+                            <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => previewCaseAttachment(item.file, item.name)} />
+                          </Tooltip>
+                        ) : (
+                          <Tooltip title="下载">
+                            <Button size="small" type="text" icon={<DownloadOutlined />} href={caseAttachmentFileUrl(item.file, { download: true })} />
+                          </Tooltip>
+                        )}
+                        <Tooltip title="引用到上传步骤">
+                          <Button size="small" type="text" icon={<LinkOutlined />} disabled={!effectiveUploadStepId} onClick={() => applyAttachment(item.file)} />
+                        </Tooltip>
+                        <Tooltip title="生成提示词">
+                          <Button size="small" type="text" icon={<RobotOutlined />} onClick={() => openAttachmentPrompt(item)} />
+                        </Tooltip>
+                        <Tooltip title="复制路径">
+                          <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => void copyAttachmentPath(item.file)} />
+                        </Tooltip>
+                        <Tooltip title="删除附件">
+                          <Button size="small" danger type="text" icon={<DeleteOutlined />} onClick={() => void deleteAttachment(item.file)} />
+                        </Tooltip>
                       </Space>
                     </div>
                   ))}
@@ -759,25 +812,37 @@ export default function CaseEditor() {
               {visibleSearchResults.length ? (
                 <div className="max-h-[220px] divide-y divide-slate-100 overflow-auto rounded border border-slate-100">
                   {visibleSearchResults.map((item) => (
-                    <div key={`${item.kind}-${item.file}`} className="flex items-center justify-between gap-2 px-2 py-2 text-sm">
-                      <span className="min-w-0 flex-1 truncate" title={item.file}>
-                        {item.kind === "directory" ? <FolderOpenOutlined className="mr-1 text-amber-500" /> : <PaperClipOutlined className="mr-1 text-slate-400" />}
-                        {item.file}
+                    <div key={`${item.kind}-${item.file}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2 py-2 text-sm">
+                      <span className="min-w-0" title={item.file}>
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          {item.kind === "directory" ? <FolderOpenOutlined className="shrink-0 text-amber-500" /> : <PaperClipOutlined className="shrink-0 text-slate-400" />}
+                          <span className="truncate font-mono text-xs text-slate-700">{item.name || attachmentFileName(item.file)}</span>
+                        </span>
+                        <span className="mt-0.5 block truncate text-[11px] text-slate-400">{item.file}</span>
                       </span>
-                      <Space size={4}>
-                        <Button size="small" onClick={() => void copyAttachmentPath(item.file)}>
-                          复制
-                        </Button>
+                      <Space size={0} className="shrink-0">
                         {item.kind === "file" ? (
                           <>
-                            <Button size="small" type="link" disabled={!effectiveUploadStepId} onClick={() => applyAttachment(item.file)}>
-                              引用
-                            </Button>
-                            <Button size="small" type="link" onClick={() => togglePromptFile(searchResultToPromptFile(item), true)}>
-                              加入提示词
-                            </Button>
+                            {primaryAttachmentViewAction(item) === "preview" ? (
+                              <Tooltip title="预览">
+                                <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => previewCaseAttachment(item.file, item.name)} />
+                              </Tooltip>
+                            ) : (
+                              <Tooltip title="下载">
+                                <Button size="small" type="text" icon={<DownloadOutlined />} href={caseAttachmentFileUrl(item.file, { download: true })} />
+                              </Tooltip>
+                            )}
+                            <Tooltip title="引用到上传步骤">
+                              <Button size="small" type="text" icon={<LinkOutlined />} disabled={!effectiveUploadStepId} onClick={() => applyAttachment(item.file)} />
+                            </Tooltip>
+                            <Tooltip title="加入提示词">
+                              <Button size="small" type="text" icon={<RobotOutlined />} onClick={() => togglePromptFile(searchResultToPromptFile(item), true)} />
+                            </Tooltip>
                           </>
                         ) : null}
+                        <Tooltip title="复制路径">
+                          <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => void copyAttachmentPath(item.file)} />
+                        </Tooltip>
                       </Space>
                     </div>
                   ))}
@@ -892,7 +957,7 @@ export default function CaseEditor() {
                             type="button"
                             className="h-10 w-10 shrink-0 overflow-hidden rounded border border-slate-200 bg-slate-50"
                             title="预览图片"
-                            onClick={() => setPreviewAttachment(item)}
+                            onClick={() => setPreviewAttachment({ name: item.name, previewUrl: item.previewUrl! })}
                           >
                             <img src={item.previewUrl} alt={item.name} className="h-full w-full object-cover" />
                           </button>
@@ -909,7 +974,7 @@ export default function CaseEditor() {
                         </span>
                         <Space size={2}>
                           {item.previewUrl ? (
-                            <Button size="small" type="link" icon={<EyeOutlined />} onClick={() => setPreviewAttachment(item)}>
+                            <Button size="small" type="link" icon={<EyeOutlined />} onClick={() => setPreviewAttachment({ name: item.name, previewUrl: item.previewUrl! })}>
                               预览
                             </Button>
                           ) : null}
@@ -938,9 +1003,17 @@ export default function CaseEditor() {
                 {aiStreaming ? "生成中" : aiValidation?.valid ? "可应用" : aiDraft ? "待确认" : "未生成"}
               </Tag>
             </div>
-            <pre className="m-0 min-h-[520px] flex-1 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-6 text-slate-200">
-              {aiDraft || "选择模式并点击生成后，AI 会在这里流式输出 YAML 草稿。"}
-            </pre>
+            <div className="min-h-[520px] flex-1 overflow-auto p-4">
+              {aiStreaming && !aiDraft ? (
+                <div className="mb-3 rounded-lg border border-slate-700 bg-slate-900 px-4 py-3">
+                  <AiThinking text={aiYamlPreviewPlaceholder(true)} />
+                </div>
+              ) : null}
+              <pre className="m-0 whitespace-pre-wrap break-words font-mono text-xs leading-6 text-slate-200">
+                {aiDraft || (!aiStreaming ? aiYamlPreviewPlaceholder(false) : "")}
+                {aiTyping && aiDraft ? <span className="typewriter-caret typewriter-caret--mono" aria-hidden="true" /> : null}
+              </pre>
+            </div>
           </div>
         </div>
       </Drawer>
@@ -974,12 +1047,12 @@ export default function CaseEditor() {
       <Modal
         title={previewAttachment?.name ?? "图片预览"}
         open={Boolean(previewAttachment)}
-        width={820}
+        width={IMAGE_PREVIEW_MODAL_WIDTH}
         footer={null}
         onCancel={() => setPreviewAttachment(undefined)}
       >
         {previewAttachment?.previewUrl ? (
-          <img src={previewAttachment.previewUrl} alt={previewAttachment.name} className="max-h-[70vh] w-full object-contain" />
+          <img src={previewAttachment.previewUrl} alt={previewAttachment.name} className={`${IMAGE_PREVIEW_MAX_HEIGHT_CLASS} w-full object-contain`} />
         ) : null}
       </Modal>
     </div>
@@ -1056,6 +1129,10 @@ function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function attachmentFileName(file: string): string {
+  return file.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? file;
 }
 
 function normalizeAiYaml(content: string): string {

@@ -1,8 +1,13 @@
 import { request } from "./request";
-import type { CaseAttachmentSearchResult, CaseAttachmentResult, CaseDetail, CaseItem, CasePreflightResult, CaseValidationResult, CreateCaseInput, DeleteAttachmentResult, DeleteCaseResult, ImportYamlResult, SaveCaseResult } from "../types/case";
+import { apiUrl } from "./base-url";
+import type { CaseAttachmentSearchResult, CaseAttachmentResult, CaseDetail, CaseItem, CasePreflightResult, CaseValidationResult, CreateCaseInput, DeleteAttachmentResult, DeleteCaseResult, ImportYamlResult, SaveCaseResult, SharedAbility } from "../types/case";
 
 export function listCases(): Promise<CaseItem[]> {
   return request.get<unknown, CaseItem[]>("/cases");
+}
+
+export function listSharedAbilities(): Promise<SharedAbility[]> {
+  return request.get<unknown, SharedAbility[]>("/cases/shared-abilities");
 }
 
 export function getCase(caseId: string): Promise<CaseDetail> {
@@ -45,6 +50,14 @@ export function searchCaseAttachments(params: { caseId?: string; query?: string;
 
 export function deleteCaseAttachment(caseId: string, file: string): Promise<DeleteAttachmentResult> {
   return request.delete<unknown, DeleteAttachmentResult>(`/cases/${caseId}/attachments?file=${encodeURIComponent(file)}`);
+}
+
+export function caseAttachmentFileUrl(file: string, options?: { download?: boolean }): string {
+  const query = new URLSearchParams({ file });
+  if (options?.download) {
+    query.set("download", "true");
+  }
+  return apiUrl(`/cases/attachments/file?${query}`);
 }
 
 export function saveCase(caseId: string, content: string): Promise<SaveCaseResult> {

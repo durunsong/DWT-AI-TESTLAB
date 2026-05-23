@@ -1,6 +1,6 @@
 import { Button } from "antd";
 import { CopyOutlined } from "@ant-design/icons";
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { cn } from "../utils/cn";
 
 interface MarkdownViewerProps {
@@ -17,7 +17,7 @@ type Block =
   | { type: "code"; code: string };
 
 export function MarkdownViewer({ content, onCopyCode, className }: MarkdownViewerProps) {
-  const blocks = parseMarkdown(content);
+  const blocks = useMemo(() => parseMarkdown(content), [content]);
 
   return (
     <div className={cn("text-sm leading-7 text-slate-100", className ?? "max-h-[62vh] min-h-[260px] overflow-auto rounded-lg bg-slate-950 p-5")}>
@@ -91,7 +91,7 @@ function renderBlock(block: Block, index: number, onCopyCode?: (code: string) =>
   );
 }
 
-function parseMarkdown(content: string): Block[] {
+export function parseMarkdown(content: string): Block[] {
   const lines = content.replace(/\r\n/g, "\n").split("\n");
   const blocks: Block[] = [];
   let index = 0;
@@ -152,7 +152,12 @@ function parseMarkdown(content: string): Block[] {
     const paragraph: string[] = [];
     while (index < lines.length) {
       const current = lines[index] ?? "";
-      if (!current.trim() || current.trim().startsWith("```") || /^(#{1,4})\s+/.test(current) || /^\s*(?:\d+[.)]|[-*])\s+/.test(current)) {
+      if (
+        !current.trim() ||
+        current.trim().startsWith("```") ||
+        /^(#{1,4})\s+.+$/.test(current) ||
+        /^\s*(?:\d+[.)]|[-*])\s+.+$/.test(current)
+      ) {
         break;
       }
       paragraph.push(current);
