@@ -1,9 +1,9 @@
 import { Button, Space } from "antd";
-import { FileTextOutlined, FolderOpenOutlined } from "@ant-design/icons";
+import { FileTextOutlined, FolderOpenOutlined, RobotOutlined } from "@ant-design/icons";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import type { TestRunSummary } from "../types/run";
-import { toArtifactUrl } from "../utils/artifact-url";
+import { buildReportModePath, type ReportLinkMode } from "./report-links";
 
 interface ReportLinksProps {
   run?: TestRunSummary;
@@ -13,9 +13,9 @@ export function ReportLinks({ run }: ReportLinksProps) {
   const navigate = useNavigate();
   const links = run?.reportLinks;
 
-  function openReport(mode: "html" | "json" | "screenshots" | "logs") {
+  function openReport(mode: ReportLinkMode) {
     if (!run?.runId) return;
-    navigate(`/reports/${run.runId}?mode=${mode}`);
+    navigate(buildReportModePath(mode, run.runId));
   }
 
   return (
@@ -23,7 +23,8 @@ export function ReportLinks({ run }: ReportLinksProps) {
       <LinkButton label="HTML 报告" disabled={!links?.html} icon={<FileTextOutlined />} onClick={() => openReport("html")} />
       <LinkButton label="JSON 报告" disabled={!run?.runId} icon={<FileTextOutlined />} onClick={() => openReport("json")} />
       <LinkButton label="截图查看" disabled={!run?.runId} icon={<FolderOpenOutlined />} onClick={() => openReport("screenshots")} />
-      <LinkButton label="Trace 目录" disabled={!links?.traces} href={toArtifactUrl(links?.traces)} icon={<FolderOpenOutlined />} />
+      <LinkButton label="AI 分析" disabled={!run?.runId} icon={<RobotOutlined />} onClick={() => openReport("ai-analysis")} />
+      <LinkButton label="Trace 目录" disabled={!run?.runId} icon={<FolderOpenOutlined />} onClick={() => openReport("traces")} />
       <LinkButton label="运行日志" disabled={!run?.runId} icon={<FileTextOutlined />} onClick={() => openReport("logs")} />
     </Space>
   );

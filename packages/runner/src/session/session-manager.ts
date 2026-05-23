@@ -17,6 +17,10 @@ export class SessionManager {
       headless: boolean;
       slowMo: number;
       tracesDir: string;
+      defaultViewport: {
+        width: number;
+        height: number;
+      };
       browserLauncher?: () => Promise<Browser>;
     }
   ) {}
@@ -73,6 +77,16 @@ export class SessionManager {
     }
   }
 
+  async cookieHeader(sessionName: SessionName, url: string): Promise<string | undefined> {
+    const managed = this.sessions.get(sessionName);
+    if (!managed?.context) {
+      return undefined;
+    }
+    const cookies = await managed.context.cookies(url).catch(() => []);
+    const header = cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
+    return header || undefined;
+  }
+
   async saveTrace(sessionName: SessionName, runId: string): Promise<string | undefined> {
     const managed = this.sessions.get(sessionName);
     if (!managed?.context) {
@@ -98,8 +112,8 @@ export class SessionManager {
     }
     const existing = this.sessions.get(config.name);
     await existing?.context?.close().catch(() => undefined);
-    const width = Number(process.env.BROWSER_VIEWPORT_WIDTH ?? 1920);
-    const height = Number(process.env.BROWSER_VIEWPORT_HEIGHT ?? 1080);
+    const width = Number(process.env.BROWSER_VIEWPORT_WIDTH ?? this.options.defaultViewport.width);
+    const height = Number(process.env.BROWSER_VIEWPORT_HEIGHT ?? this.options.defaultViewport.height);
     const context = await this.browser.newContext({
       viewport: this.options.headless ? { width, height } : null,
       screen: { width, height }

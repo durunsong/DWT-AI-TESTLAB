@@ -9,15 +9,18 @@ import { createArtifactPaths } from "../utils/artifact";
 import { EnvGuard } from "../utils/env-guard";
 import { RunLogger } from "../utils/logger";
 import { VisualExecutor } from "../executors/visual-executor";
+import { ApiExecutor } from "../executors/api-executor";
 import { DbExecutor } from "../executors/db-executor";
 import { DbStepExecutor } from "../executors/db-step-executor";
 import { WebExecutor } from "../executors/web-executor";
+import { loadPlatformConfig, type PlatformConfig } from "../config/platform-config";
 
 export type RunnerEventHandler = (event: TestRunEvent) => void | Promise<void>;
 
 export interface ScenarioRunInput {
   caseId: string;
   env: string;
+  filePath?: string;
   runId?: string;
   onEvent?: RunnerEventHandler;
 }
@@ -27,8 +30,10 @@ export class ScenarioOrchestrator {
   private readonly locationLoader: LocationLoader;
   private readonly contextManager = new ContextManager();
   private readonly reportBuilder = new ReportBuilder();
+  private readonly platformConfig: PlatformConfig;
 
   constructor(private readonly rootDir: string) {
+    this.platformConfig = loadPlatformConfig(rootDir);
     this.scenarioLoader = new ScenarioLoader(rootDir);
     this.locationLoader = new LocationLoader(rootDir);
   }
@@ -39,25 +44,33 @@ export class ScenarioOrchestrator {
 
   async run(input: ScenarioRunInput): Promise<RunReport> {
     EnvGuard.assertRunnable(input.env);
-    const scenario = await this.scenarioLoader.loadByCaseId(input.caseId);
+    const scenario = input.filePath
+      ? await this.scenarioLoader.load(input.filePath)
+      : await this.scenarioLoader.loadByCaseId(input.caseId);
     const runId = input.runId ?? `run_${crypto.randomUUID().slice(0, 8)}`;
     const startedAt = new Date().toISOString();
-    const artifacts = await createArtifactPaths(this.rootDir, runId);
+    const artifacts = await createArtifactPaths(this.rootDir, runId, this.platformConfig);
     const logger = new RunLogger(artifacts.logFile);
     const context = this.contextManager.create(runId, input.env, scenario);
     EnvGuard.assertRunnable(input.env, { ...scenario, sessions: Object.values(context.state.sessions) });
 
     const locations = await this.locationLoader.load(scenario.locations.file);
     const steps = scenario.steps.map((step) => this.createPendingResult(step));
+    const hasWebSteps = scenario.steps.some((step) => !this.isDbStep(step) && !this.isApiStep(step));
     const sessionManager = new SessionManager({
       headless: process.env.HEADLESS === "true",
       slowMo: Number(process.env.SLOW_MO ?? 100),
-      tracesDir: artifacts.tracesDir
+      tracesDir: artifacts.tracesDir,
+      defaultViewport: this.platformConfig.browser.defaultViewport
     });
     const visual = new VisualExecutor(process.env.VISUAL_MODE === "true" || process.env.HEADLESS !== "true");
     const dbExecutor = new DbStepExecutor({
       context,
       db: new DbExecutor({ env: input.env, enabled: process.env.DB_ENABLED === "true" })
+    });
+    const apiExecutor = new ApiExecutor({
+      context,
+      sessionCookieHeader: (session, url) => sessionManager.cookieHeader(session, url)
     });
     const webExecutor = new WebExecutor({
       rootDir: this.rootDir,
@@ -76,14 +89,16 @@ export class ScenarioOrchestrator {
 
     let failed = false;
     try {
-      await sessionManager.initialize(Object.values(context.state.sessions));
+      if (hasWebSteps) {
+        await sessionManager.initialize(Object.values(context.state.sessions));
+      }
 
       for (let index = 0; index < scenario.steps.length; index += 1) {
         const originalStep = scenario.steps[index];
         const stepResult = steps[index];
         if (!originalStep || !stepResult) continue;
 
-        if (failed) {
+        if (failed && originalStep.phase !== "afterActions") {
           stepResult.status = "skipped";
           await this.emit(input.onEvent, { runId, type: "step_updated", status: "skipped", step: stepResult, at: new Date().toISOString() });
           continue;
@@ -98,7 +113,9 @@ export class ScenarioOrchestrator {
           step = resolveRecordValues(originalStep, context.state, originalStep) as ScenarioStep;
           const partial = this.isDbStep(step)
             ? await dbExecutor.execute(step)
-            : await this.executeWebStep(sessionManager, webExecutor, step);
+            : this.isApiStep(step)
+              ? await apiExecutor.execute(step)
+              : await this.executeWebStep(sessionManager, webExecutor, step);
           Object.assign(stepResult, partial);
           stepResult.status = "passed";
           stepResult.endedAt = new Date().toISOString();
@@ -106,7 +123,7 @@ export class ScenarioOrchestrator {
           await logger.info(`步骤执行成功：${step.step_id}`, { durationMs: stepResult.durationMs });
           await this.emit(input.onEvent, { runId, type: "step_updated", status: "passed", step: stepResult, at: stepResult.endedAt });
         } catch (error) {
-          const page = step.session && !this.isDbStep(step) ? await sessionManager.getPage(step.session).catch(() => undefined) : undefined;
+          const page = step.session && !this.isDbStep(step) && !this.isApiStep(step) ? await sessionManager.getPage(step.session).catch(() => undefined) : undefined;
           const apiDiagnostic = readApiDiagnostic(error);
           if (page) {
             const failurePartial = await webExecutor.captureFailure(page, step.step_id);
@@ -124,7 +141,7 @@ export class ScenarioOrchestrator {
           stepResult.error = error instanceof Error ? error.message : String(error);
           await logger.error(`步骤执行失败：${step.step_id}`, { error: stepResult.error, data: stepResult.data });
           await this.emit(input.onEvent, { runId, type: "step_updated", status: "failed", step: stepResult, at: stepResult.endedAt });
-          failed = !step.continue_on_failure;
+          failed = step.phase === "afterActions" || !step.continue_on_failure;
         }
       }
     } catch (error) {
@@ -136,8 +153,10 @@ export class ScenarioOrchestrator {
       }
       await logger.error("测试运行异常中断", { error: error instanceof Error ? error.message : String(error) });
     } finally {
-      for (const session of Object.keys(context.state.sessions)) {
-        await sessionManager.saveTrace(session as never, runId).catch(() => undefined);
+      if (hasWebSteps) {
+        for (const session of Object.keys(context.state.sessions)) {
+          await sessionManager.saveTrace(session as never, runId).catch(() => undefined);
+        }
       }
       await sessionManager.closeAll();
     }
@@ -180,6 +199,10 @@ export class ScenarioOrchestrator {
 
   private isDbStep(step: ScenarioStep): boolean {
     return step.type === "db_query" || step.type === "db_assert" || step.type === "db_clean";
+  }
+
+  private isApiStep(step: ScenarioStep): boolean {
+    return step.type === "api_request" || step.type === "api_assert";
   }
 
   private async emit(handler: RunnerEventHandler | undefined, event: TestRunEvent): Promise<void> {

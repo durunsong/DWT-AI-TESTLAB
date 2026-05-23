@@ -23,7 +23,9 @@ admin_home_marker:
     - text: "控制台"
 admin_avatar_upload:
   fallback:
-    - xpath: "//div[contains(@class, 'avatar-upload')]"
+    - css: ".edit-form .image input[type='file']"
+    - css: ".img-picker input[type='file']"
+    - xpath: "//*[normalize-space()='上传头像']/ancestor::*[contains(@class,'form-item') or contains(@class,'el-form-item')][1]//input[@type='file']"
 admin_profile_username:
   fallback:
     - css: "input[name='username']"

@@ -1,6 +1,9 @@
 case_id: login_template
 case_name: 登录流程模板
 mode: web
+defaults:
+  step_timeout_ms: 20000
+  wait_for_network: true
 sessions:
   - name: user
     login_url: "${env.USER_LOGIN_URL}"

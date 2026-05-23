@@ -1,11 +1,14 @@
-import { useEffect, useState } from "react";
-import { Alert, Button, Card, Form, Input, Modal, Popconfirm, Radio, Space, Table, Tabs, Tag, Tooltip, Typography, Upload, message } from "antd";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Button, Card, Checkbox, Form, Input, Modal, Popconfirm, Radio, Select, Space, Table, Tabs, Tag, Tooltip, Typography, Upload, message } from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
   CloudUploadOutlined,
   DeleteOutlined,
   EditOutlined,
+  EyeOutlined,
+  FileImageOutlined,
+  PaperClipOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -13,26 +16,36 @@ import {
   UndoOutlined
 } from "@ant-design/icons";
 import type { UploadFile } from "antd";
+import type { RcFile } from "antd/es/upload";
 import { useNavigate } from "react-router-dom";
 import { generateMaterialCaseDraft } from "../../api/ai";
-import { deleteCase, importCaseYaml, listCases } from "../../api/cases";
+import { deleteCase, getCase, importCaseYaml, listCases, listSharedAbilities } from "../../api/cases";
 import { createTestRun } from "../../api/testRuns";
 import { EnvSelector } from "../../components/EnvSelector";
+import { IMAGE_PREVIEW_MAX_HEIGHT_CLASS, IMAGE_PREVIEW_MODAL_WIDTH } from "../../components/image-preview";
 import { PageHeader } from "../../components/PageHeader";
 import { useCaseStore } from "../../stores/useCaseStore";
 import { useRunStore } from "../../stores/useRunStore";
 import { useSettingStore } from "../../stores/useSettingStore";
-import type { CaseItem, CreateCaseInput, CreateCaseTemplate } from "../../types/case";
+import type { CaseItem, CreateCaseTemplate, SharedAbility } from "../../types/case";
+import { cn } from "../../utils/cn";
 import type { ScenarioMode, ScenarioStep } from "@ai-e2e/shared";
+import { hasFileDrag } from "../CaseEditor/drag-upload";
+import { buildCaseSourceOptions, createCaseYamlFromSource } from "./case-source";
+import { createCaseListCopyMeta, type CaseListCopyTarget } from "./case-list-copy";
+import { canAcceptCreateCaseMaterialDrop, createCaseMaterialDropCopy } from "./material-drop";
+import { buildSharedAbilityOptions, summarizeSelectedSharedAbilities } from "./shared-abilities";
 
 interface CreateCaseFormValues {
   caseId: string;
   caseName: string;
   description?: string;
+  sourceCaseId: string;
   template: CreateCaseTemplate;
   requirement?: string;
   prdText?: string;
   docUrlsText?: string;
+  sharedAbilityIds?: string[];
 }
 
 const templateOptions: Array<{ label: string; value: CreateCaseTemplate; description: string }> = [
@@ -52,6 +65,7 @@ const templateOptions: Array<{ label: string; value: CreateCaseTemplate; descrip
     description: "创建 user 提交 KYC、admin 登录并审核通过的端到端流程骨架。"
   }
 ];
+const materialUploadMaxMb = Number(import.meta.env.VITE_APP_UPLOAD_MAX_MB || 8);
 
 interface TemplateDraft {
   mode: ScenarioMode;
@@ -207,11 +221,20 @@ export default function CaseList() {
   const [loading, setLoading] = useState(false);
   const [runningCaseId, setRunningCaseId] = useState("");
   const [deletingCaseId, setDeletingCaseId] = useState("");
+  const [deleteAttachmentsByCaseId, setDeleteAttachmentsByCaseId] = useState<Record<string, boolean>>({});
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createMode, setCreateMode] = useState<"template" | "ai">("template");
   const [templateSteps, setTemplateSteps] = useState<ScenarioStep[]>(() => cloneTemplateSteps("user_login"));
   const [materialFiles, setMaterialFiles] = useState<UploadFile[]>([]);
+  const [previewMaterial, setPreviewMaterial] = useState<{ name: string; dataUrl: string }>();
+  const [materialDropActive, setMaterialDropActive] = useState(false);
+  const [sharedAbilities, setSharedAbilities] = useState<SharedAbility[]>([]);
+  const [sharedAbilitiesLoading, setSharedAbilitiesLoading] = useState(false);
+  const caseSourceOptions = useMemo(() => buildCaseSourceOptions(cases), [cases]);
+  const sharedAbilityOptions = useMemo(() => buildSharedAbilityOptions(sharedAbilities), [sharedAbilities]);
+  const materialDragDepthRef = useRef(0);
+  const materialDropCopy = materialDropActive ? createCaseMaterialDropCopy() : undefined;
 
   async function refresh() {
     setLoading(true);
@@ -227,6 +250,90 @@ export default function CaseList() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  useEffect(() => {
+    if (!createOpen) {
+      return;
+    }
+
+    setSharedAbilitiesLoading(true);
+    listSharedAbilities()
+      .then((abilities) => {
+        setSharedAbilities(abilities);
+        const selected = form.getFieldValue("sharedAbilityIds");
+        if (!selected?.length) {
+          form.setFieldValue("sharedAbilityIds", abilities.map((item) => item.sharedId));
+        }
+      })
+      .catch((error) => messageApi.warning(error instanceof Error ? error.message : String(error)))
+      .finally(() => setSharedAbilitiesLoading(false));
+  }, [createOpen, form, messageApi]);
+
+  useEffect(() => {
+    const canAcceptDrop = canAcceptCreateCaseMaterialDrop({ createOpen, createMode, creating });
+
+    const resetDragState = () => {
+      materialDragDepthRef.current = 0;
+      setMaterialDropActive(false);
+    };
+
+    const markDragState = (event: DragEvent) => {
+      if (!hasFileDrag(event.dataTransfer?.types)) {
+        return false;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = canAcceptDrop ? "copy" : "none";
+      }
+      setMaterialDropActive(canAcceptDrop);
+      return true;
+    };
+
+    const handleDragEnter = (event: DragEvent) => {
+      if (!markDragState(event)) return;
+      materialDragDepthRef.current += 1;
+    };
+
+    const handleDragOver = (event: DragEvent) => {
+      markDragState(event);
+    };
+
+    const handleDragLeave = (event: DragEvent) => {
+      if (!hasFileDrag(event.dataTransfer?.types)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      materialDragDepthRef.current = Math.max(0, materialDragDepthRef.current - 1);
+      if (materialDragDepthRef.current === 0) {
+        setMaterialDropActive(false);
+      }
+    };
+
+    const handleDrop = (event: DragEvent) => {
+      if (!hasFileDrag(event.dataTransfer?.types)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      resetDragState();
+      if (!canAcceptDrop || !files.length) {
+        return;
+      }
+
+      void appendDroppedMaterialFiles(files);
+    };
+
+    document.addEventListener("dragenter", handleDragEnter);
+    document.addEventListener("dragover", handleDragOver);
+    document.addEventListener("dragleave", handleDragLeave);
+    document.addEventListener("drop", handleDrop);
+    return () => {
+      document.removeEventListener("dragenter", handleDragEnter);
+      document.removeEventListener("dragover", handleDragOver);
+      document.removeEventListener("dragleave", handleDragLeave);
+      document.removeEventListener("drop", handleDrop);
+    };
+  }, [createMode, createOpen, creating, materialFiles]);
 
   async function runCase(caseId: string) {
     setRunningCaseId(caseId);
@@ -244,28 +351,40 @@ export default function CaseList() {
   async function removeCase(caseId: string) {
     setDeletingCaseId(caseId);
     try {
-      await deleteCase(caseId);
+      const result = await deleteCase(caseId, { deleteAttachments: deleteAttachmentsByCaseId[caseId] });
       messageApi.success("用例已删除");
+      if (result.attachmentsDeleted) {
+        messageApi.info(`已同步删除附件目录：${result.attachmentsDir ?? "-"}`);
+      }
       await refresh();
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : String(error));
     } finally {
       setDeletingCaseId("");
+      setDeleteAttachmentsByCaseId((current) => {
+        const next = { ...current };
+        delete next[caseId];
+        return next;
+      });
     }
   }
 
   function openCreateModal() {
+    const defaultSourceCaseId = buildCaseSourceOptions(cases)[0]?.value ?? "";
     form.resetFields();
     form.setFieldsValue({
       caseId: "",
       caseName: "",
       description: "",
+      sourceCaseId: defaultSourceCaseId,
       template: "user_login",
       requirement: "",
       prdText: "",
-      docUrlsText: ""
+      docUrlsText: "",
+      sharedAbilityIds: sharedAbilities.map((item) => item.sharedId)
     });
     setMaterialFiles([]);
+    setPreviewMaterial(undefined);
     setCreateMode("template");
     setTemplateSteps(cloneTemplateSteps("user_login"));
     setCreateOpen(true);
@@ -275,17 +394,13 @@ export default function CaseList() {
     const values = await form.validateFields();
     setCreating(true);
     try {
-      const payload: CreateCaseInput = {
-        caseId: normalizeCaseId(values.caseId),
-        caseName: values.caseName,
-        description: values.description,
-        template: values.template
-      };
+      const caseId = normalizeCaseId(values.caseId);
       const created = createMode === "ai"
-        ? await createCaseByAi(values, payload.caseId)
-        : await createCaseByTemplate(values, payload.caseId);
+        ? await createCaseByAi(values, caseId)
+        : await createCaseByTemplate(values, caseId);
       messageApi.success(createMode === "ai" ? "AI 用例已生成" : "用例已创建");
       setCreateOpen(false);
+      setPreviewMaterial(undefined);
       await refresh();
       navigate(`/cases/${created.caseId}`);
     } catch (error) {
@@ -306,11 +421,12 @@ export default function CaseList() {
       caseId,
       caseName: values.caseName,
       description: values.description,
-      templateHint: templateOptions.find((item) => item.value === values.template)?.label,
+      templateHint: caseSourceOptions.find((item) => item.value === values.sourceCaseId)?.label,
       requirement: values.requirement,
       prdText: values.prdText,
       docUrls,
-      files
+      files,
+      sharedAbilities: summarizeSelectedSharedAbilities(sharedAbilities, values.sharedAbilityIds)
     });
     const saved = await importCaseYaml({ content: result.content, caseId });
     if (!saved.saved) {
@@ -320,6 +436,25 @@ export default function CaseList() {
   }
 
   async function createCaseByTemplate(values: CreateCaseFormValues, caseId: string) {
+    const sourceCaseId = values.sourceCaseId;
+    const sourceOption = caseSourceOptions.find((item) => item.value === sourceCaseId);
+    if (!sourceCaseId || !sourceOption) {
+      throw new Error("请选择一个可用的用例来源");
+    }
+    const source = await getCase(sourceCaseId);
+    const savedFromSource = await importCaseYaml({
+      content: createCaseYamlFromSource(source.content, {
+        caseId,
+        caseName: values.caseName,
+        description: values.description
+      }),
+      caseId
+    });
+    if (!savedFromSource.saved) {
+      throw new Error(savedFromSource.validation?.issues?.map((item) => `${item.path}: ${item.message}`).join("; ") || "用例来源 YAML 未通过校验");
+    }
+    return savedFromSource;
+
     if (templateSteps.length === 0) {
       throw new Error("模板步骤不能为空，请恢复默认步骤或至少保留一个步骤");
     }
@@ -335,6 +470,54 @@ export default function CaseList() {
 
   function resetTemplateSteps(template: CreateCaseTemplate = form.getFieldValue("template") ?? "user_login") {
     setTemplateSteps(cloneTemplateSteps(template));
+  }
+
+  function handleMaterialBeforeUpload(file: RcFile) {
+    if (file.size > materialUploadMaxMb * 1024 * 1024) {
+      messageApi.error(`${file.name} 超过 ${materialUploadMaxMb}MB，请拆分或精简后再上传`);
+      return Upload.LIST_IGNORE;
+    }
+    return false;
+  }
+
+  function handleMaterialFilesChange(fileList: UploadFile[]) {
+    void hydrateMaterialFilePreviews(fileList);
+  }
+
+  async function appendDroppedMaterialFiles(files: File[]) {
+    const acceptedFiles = files
+      .map((file, index) => toMaterialUploadFile(file, index))
+      .filter((file) => handleMaterialBeforeUpload(file.originFileObj as RcFile) !== Upload.LIST_IGNORE);
+
+    if (!acceptedFiles.length) {
+      return;
+    }
+
+    await hydrateMaterialFilePreviews([...materialFiles, ...acceptedFiles]);
+  }
+
+  async function hydrateMaterialFilePreviews(fileList: UploadFile[]) {
+    const nextFiles = await Promise.all(fileList.map(async (file) => {
+      if (!isImageUploadFile(file) || file.thumbUrl || !file.originFileObj) {
+        return file;
+      }
+      return {
+        ...file,
+        thumbUrl: await readFileAsDataUrl(file.originFileObj)
+      };
+    }));
+    setMaterialFiles(nextFiles);
+  }
+
+  function removeMaterialFile(uid: string) {
+    setMaterialFiles((current) => current.filter((item) => item.uid !== uid));
+  }
+
+  async function openMaterialPreview(file: UploadFile) {
+    if (!isImageUploadFile(file)) return;
+    const dataUrl = file.thumbUrl || (file.originFileObj ? await readFileAsDataUrl(file.originFileObj) : "");
+    if (!dataUrl) return;
+    setPreviewMaterial({ name: file.name, dataUrl });
   }
 
   function moveTemplateStep(index: number, offset: -1 | 1) {
@@ -371,9 +554,36 @@ export default function CaseList() {
     }
   }
 
+  async function copyCaseListText(target: CaseListCopyTarget, value?: string) {
+    if (!value) {
+      return;
+    }
+    const meta = createCaseListCopyMeta(target, value);
+    try {
+      await navigator.clipboard.writeText(value);
+      messageApi.success(meta.successMessage);
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "复制失败");
+    }
+  }
+
   return (
     <div className="flex min-h-full flex-col gap-2.5">
       {contextHolder}
+      {materialDropCopy ? (
+        <div className="case-editor-drop-sense fixed inset-0 z-[2147483000] flex items-center justify-center px-8">
+          <div className={cn("case-editor-drop-sense__panel", "case-editor-drop-sense__panel--ai")}>
+            <CloudUploadOutlined className="case-editor-drop-sense__icon" />
+            <Typography.Title level={3} className="!mb-2 !mt-0 !text-inherit">
+              {materialDropCopy.title}
+            </Typography.Title>
+            <Typography.Text className="!text-inherit">
+              {materialDropCopy.description}
+            </Typography.Text>
+            <div className="case-editor-drop-sense__line" />
+          </div>
+        </div>
+      ) : null}
       <PageHeader
         title="用例管理"
         description="读取 cases/scenario 下的 YAML 用例，支持查看、编辑和执行。"
@@ -408,13 +618,37 @@ export default function CaseList() {
               title: "caseId",
               dataIndex: "caseId",
               width: 190,
-              render: (caseId: string) => <span className="font-mono text-sm text-slate-900 break-all">{caseId}</span>
+              render: (caseId: string) => {
+                const meta = createCaseListCopyMeta("caseId", caseId);
+                return (
+                  <button
+                    type="button"
+                    className="block max-w-full cursor-copy break-all rounded px-1 py-0.5 text-left font-mono text-sm leading-6 text-slate-900 transition hover:bg-blue-50 hover:text-blue-700"
+                    title={meta.title}
+                    onClick={() => void copyCaseListText("caseId", caseId)}
+                  >
+                    {caseId}
+                  </button>
+                );
+              }
             },
             {
               title: "名称",
               dataIndex: "caseName",
               width: 220,
-              render: (caseName: string) => <span className="block leading-6 text-slate-900">{caseName}</span>
+              render: (caseName: string) => {
+                const meta = createCaseListCopyMeta("caseName", caseName);
+                return (
+                  <button
+                    type="button"
+                    className="block max-w-full cursor-copy whitespace-normal break-words rounded px-1 py-0.5 text-left leading-6 text-slate-900 transition hover:bg-blue-50 hover:text-blue-700"
+                    title={meta.title}
+                    onClick={() => void copyCaseListText("caseName", caseName)}
+                  >
+                    {caseName}
+                  </button>
+                );
+              }
             },
             {
               title: "说明",
@@ -468,7 +702,20 @@ export default function CaseList() {
                   </Button>
                   <Popconfirm
                     title="删除用例"
-                    description={`确定删除 ${record.caseId}.yaml？此操作不会删除历史报告。`}
+                    description={(
+                      <Space orientation="vertical" size={8}>
+                        <Typography.Text>{`确定删除 ${record.caseId}.yaml？此操作不会删除历史报告。`}</Typography.Text>
+                        <Checkbox
+                          checked={Boolean(deleteAttachmentsByCaseId[record.caseId])}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            setDeleteAttachmentsByCaseId((current) => ({ ...current, [record.caseId]: checked }));
+                          }}
+                        >
+                          同时删除该用例的上传附件/图片
+                        </Checkbox>
+                      </Space>
+                    )}
                     okText="删除"
                     cancelText="取消"
                     okButtonProps={{ danger: true, loading: deletingCaseId === record.caseId }}
@@ -494,12 +741,13 @@ export default function CaseList() {
         title="新增用例"
         open={createOpen}
         width={860}
+        style={{ top: 20 }}
         okText={createMode === "ai" ? "AI 生成并编辑" : "创建并编辑"}
         cancelText="取消"
         confirmLoading={creating}
         destroyOnHidden
         forceRender
-        maskClosable={!creating}
+        mask={{ closable: !creating }}
         styles={{ body: { maxHeight: "calc(100vh - 220px)", overflowY: "auto", paddingRight: 8, paddingBottom: 88 } }}
         onOk={() => void handleCreateCase()}
         onCancel={() => {
@@ -510,13 +758,13 @@ export default function CaseList() {
           className="mb-2.5"
           type="info"
           showIcon
-          message={createMode === "ai" ? "AI 会根据资料生成可编辑的 YAML 用例" : "新建后会生成一份可校验的 YAML 草稿"}
+          title={createMode === "ai" ? "AI 会根据资料生成可编辑的 YAML 用例" : "新建后会生成一份可校验的 YAML 草稿"}
           description="账号、密码、token 和地址仍然引用 .env 变量，不会写死到用例文件里。创建后可以继续用编辑页的 AI 助手补充步骤。"
         />
         <Form<CreateCaseFormValues>
           form={form}
           layout="vertical"
-          initialValues={{ template: "user_login" }}
+          initialValues={{ sourceCaseId: caseSourceOptions[0]?.value, template: "user_login" }}
           onValuesChange={(changed) => {
             if ("caseName" in changed && !form.getFieldValue("caseId")) {
               form.setFieldValue("caseId", normalizeCaseId(changed.caseName));
@@ -579,7 +827,31 @@ export default function CaseList() {
           <Form.Item label="说明" name="description">
             <Input.TextArea rows={3} placeholder="简要说明这个用例覆盖的业务流程、前置条件或断言目标" showCount maxLength={180} />
           </Form.Item>
-          <Form.Item label="模板" name="template" rules={[{ required: true, message: "请选择模板" }]}>
+          <Form.Item
+            label="选择用例来源"
+            name="sourceCaseId"
+            extra="从 cases/scenario 的现有用例继承 YAML 内容；login_user、login_admin 等常用用例会优先展示。"
+            rules={[{ required: createMode === "template", message: "请选择用例来源" }]}
+          >
+            <Select
+              showSearch
+              allowClear
+              placeholder="搜索 case_id、名称或文件路径"
+              optionFilterProp="searchText"
+              options={caseSourceOptions.map((option) => ({
+                label: (
+                  <div className="grid min-w-0 gap-0.5 py-1">
+                    <span className="truncate font-medium">{option.label}</span>
+                    <span className="truncate text-xs text-slate-500">{option.description}</span>
+                  </div>
+                ),
+                value: option.value,
+                searchText: `${option.label} ${option.description}`
+              }))}
+              notFoundContent={cases.length ? "没有可用的有效用例" : "暂无用例"}
+            />
+          </Form.Item>
+          <Form.Item hidden label="模板" name="template" rules={[{ required: true, message: "请选择模板" }]}>
             <Radio.Group className="w-full">
               <div className="flex w-full flex-col gap-2.5">
                 {templateOptions.map((option) => (
@@ -599,7 +871,7 @@ export default function CaseList() {
               </div>
             </Radio.Group>
           </Form.Item>
-          {createMode === "template" ? (
+          {false && createMode === "template" ? (
             <div className="mb-2.5 rounded-lg border border-slate-200 bg-slate-50 p-4">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">
@@ -663,19 +935,72 @@ export default function CaseList() {
                 <Input.TextArea rows={3} placeholder="例如：根据 PRD 生成开户申请、资料上传、后台审核通过的主流程，并补充关键断言。" />
               </Form.Item>
               <Form.Item label="粘贴 PRD / 需求说明" name="prdText">
-                <Input.TextArea rows={6} placeholder="可以直接粘贴产品 PRD、验收标准、流程说明、接口约束或页面规则。" />
+                <Input.TextArea rows={3} placeholder="可以直接粘贴产品 PRD、验收标准、流程说明、接口约束或页面规则。" />
               </Form.Item>
-              <Form.Item label="开源文档链接" name="docUrlsText" extra="每行一个公开 http/https 链接；为安全起见，不读取 localhost 或内网地址。">
+              <Form.Item label="公开文档链接" name="docUrlsText" extra="每行一个公开 http/https 链接；为安全起见，不读取 localhost 或内网地址。">
                 <Input.TextArea rows={3} placeholder={"https://example.com/docs/getting-started\nhttps://example.com/api"} />
               </Form.Item>
-              <Form.Item label="导入资料" extra="支持 docx、PDF、Markdown、TXT、JSON、YAML，以及 PNG/JPG/WebP 图片；单文件最大 8MB。">
+              <Form.Item
+                label="复用能力"
+                name="sharedAbilityIds"
+                extra="选中的共享流程会作为 AI 生成约束；AI 会优先输出 use/with 引用，减少重复步骤。"
+              >
+                {sharedAbilityOptions.length ? (
+                  <div className="grid gap-2">
+                    <Typography.Text type="secondary" className="!text-xs">
+                      来自 cases/shared/*.yaml
+                    </Typography.Text>
+                    <Select
+                      mode="multiple"
+                      allowClear
+                      showSearch
+                      optionFilterProp="searchText"
+                      placeholder="搜索并选择共享流程能力"
+                      maxTagCount="responsive"
+                      options={sharedAbilityOptions.map((option) => ({
+                        label: option.label,
+                        value: option.value,
+                        searchText: option.searchText,
+                        ability: option
+                      }))}
+                      optionRender={(option) => {
+                        const ability = option.data.ability as (typeof sharedAbilityOptions)[number];
+                        return (
+                          <div className="grid min-w-0 gap-1 py-1" title={ability.title}>
+                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                              <span className="truncate font-medium text-slate-900">{ability.label}</span>
+                              <Tag className="m-0" color="blue">
+                                {ability.value}
+                              </Tag>
+                              <Tag className="m-0">{ability.stepCount} steps</Tag>
+                            </div>
+                            {ability.description ? (
+                              <span className="whitespace-normal text-xs leading-5 text-slate-500">{ability.description}</span>
+                            ) : null}
+                            <span className="whitespace-normal text-xs leading-5 text-slate-400">
+                              {ability.paramsText ? `参数：${ability.paramsText}` : "参数：无"}
+                              {ability.tagsText ? ` / 标签：${ability.tagsText}` : ""}
+                              {` / ${ability.file}`}
+                            </span>
+                          </div>
+                        );
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-2 text-sm text-slate-500">
+                    {sharedAbilitiesLoading ? "正在读取共享能力..." : "暂无共享能力；可在 cases/shared 下新增 YAML 后刷新弹窗。"}
+                  </div>
+                )}
+              </Form.Item>
+              <Form.Item label="导入资料" extra={`支持 docx、PDF、Markdown、TXT、JSON、YAML，以及 PNG/JPG/WebP 图片；单文件最大 ${materialUploadMaxMb}MB。`}>
                 <Upload.Dragger
                   multiple
+                  showUploadList={false}
                   fileList={materialFiles}
                   accept=".docx,.pdf,.md,.markdown,.txt,.json,.yaml,.yml,.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
-                  beforeUpload={() => false}
-                  onChange={({ fileList }) => setMaterialFiles(fileList)}
-                  onRemove={(file) => setMaterialFiles((current) => current.filter((item) => item.uid !== file.uid))}
+                  beforeUpload={handleMaterialBeforeUpload}
+                  onChange={({ fileList }) => handleMaterialFilesChange(fileList)}
                 >
                   <p className="ant-upload-drag-icon">
                     <CloudUploadOutlined />
@@ -683,10 +1008,70 @@ export default function CaseList() {
                   <p className="ant-upload-text">拖拽 PRD、PDF、docx 或图片到这里</p>
                   <p className="ant-upload-hint">AI 会读取文档文本，并直接理解页面截图、流程图、原型图中的信息。</p>
                 </Upload.Dragger>
+                {materialFiles.length ? (
+                  <div className="mt-3 rounded border border-slate-200 bg-white">
+                    <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
+                      <Typography.Text strong>已导入资料</Typography.Text>
+                      <Tag color="processing">{materialFiles.length} 个文件</Tag>
+                    </div>
+                    <div className="max-h-[220px] divide-y divide-slate-100 overflow-auto">
+                      {materialFiles.map((file) => {
+                        const image = isImageUploadFile(file);
+                        return (
+                          <div key={file.uid} className="flex items-center gap-3 px-3 py-2">
+                            {image ? (
+                              <button
+                                type="button"
+                                className="flex h-12 max-w-[128px] shrink-0 items-center justify-center overflow-hidden rounded border border-slate-200 bg-slate-50"
+                                title="预览图片"
+                                onClick={() => void openMaterialPreview(file)}
+                              >
+                                {file.thumbUrl ? (
+                                  <img src={file.thumbUrl} alt={file.name} className="h-full w-auto max-w-[128px] object-contain" />
+                                ) : (
+                                  <FileImageOutlined className="text-lg text-slate-400" />
+                                )}
+                              </button>
+                            ) : (
+                              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-50 text-slate-400">
+                                <PaperClipOutlined />
+                              </span>
+                            )}
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm text-slate-900" title={file.name}>{file.name}</span>
+                              <span className="block text-xs text-slate-500">{formatBytes(file.size ?? 0)}{file.type ? ` · ${file.type}` : ""}</span>
+                            </span>
+                            <Space size={2}>
+                              {image ? (
+                                <Button size="small" type="link" icon={<EyeOutlined />} onClick={() => void openMaterialPreview(file)}>
+                                  预览
+                                </Button>
+                              ) : null}
+                              <Button size="small" danger type="link" icon={<DeleteOutlined />} onClick={() => removeMaterialFile(file.uid)}>
+                                移除
+                              </Button>
+                            </Space>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
               </Form.Item>
             </div>
           ) : null}
         </Form>
+      </Modal>
+      <Modal
+        title={previewMaterial?.name ?? "图片预览"}
+        open={Boolean(previewMaterial)}
+        footer={null}
+        width={IMAGE_PREVIEW_MODAL_WIDTH}
+        onCancel={() => setPreviewMaterial(undefined)}
+      >
+        {previewMaterial ? (
+          <img src={previewMaterial.dataUrl} alt={previewMaterial.name} className={`${IMAGE_PREVIEW_MAX_HEIGHT_CLASS} w-full object-contain`} />
+        ) : null}
       </Modal>
     </div>
   );
@@ -697,22 +1082,50 @@ async function readUploadFileAsBase64(file: UploadFile): Promise<{ name: string;
   if (!rawFile) {
     throw new Error(`${file.name} 文件读取失败`);
   }
-  if (rawFile.size > 8 * 1024 * 1024) {
-    throw new Error(`${file.name} 超过 8MB，请拆分或精简后再上传`);
+  if (rawFile.size > materialUploadMaxMb * 1024 * 1024) {
+    throw new Error(`${file.name} 超过 ${materialUploadMaxMb}MB，请拆分或精简后再上传`);
   }
 
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error(`${file.name} 文件读取失败`));
-    reader.readAsDataURL(rawFile);
-  });
+  const dataUrl = await readFileAsDataUrl(rawFile);
 
   return {
     name: file.name,
     mimeType: rawFile.type,
     base64: dataUrl.split(",", 2)[1] ?? ""
   };
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error(`${file.name} 文件读取失败`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function isImageUploadFile(file: UploadFile): boolean {
+  const mimeType = (file.type || file.originFileObj?.type || "").toLowerCase();
+  return mimeType.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(file.name);
+}
+
+function toMaterialUploadFile(file: File, index: number): UploadFile {
+  const rcFile = file as RcFile;
+  rcFile.uid = `${file.name}-${file.lastModified}-${index}`;
+  return {
+    uid: rcFile.uid,
+    name: file.name,
+    size: file.size,
+    type: file.type,
+    status: "done",
+    originFileObj: rcFile
+  };
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function normalizeCaseId(value?: string): string {

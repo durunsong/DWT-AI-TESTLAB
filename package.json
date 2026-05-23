@@ -1,12 +1,36 @@
 {
-  "name": "ai-e2e-test-platform",
+  "name": "dwt-testing",
   "version": "1.0.2",
-  "private": true,
+  "private": false,
+  "description": "Customizable AI-assisted E2E testing platform powered by TypeScript, Playwright, YAML DSL, Fastify, React and Electron.",
+  "keywords": [
+    "e2e",
+    "playwright",
+    "testing",
+    "yaml",
+    "ai",
+    "automation",
+    "electron"
+  ],
+  "homepage": "https://github.com/dwt-testing/dwt-testing#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dwt-testing/dwt-testing.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dwt-testing/dwt-testing/issues"
+  },
   "type": "module",
   "scripts": {
     "predev": "node scripts/kill-dev-ports.mjs",
     "dev": "pnpm --parallel --filter @ai-e2e/server --filter @ai-e2e/web dev",
     "dev:stop": "node scripts/kill-dev-ports.mjs",
+    "setup:platform": "node scripts/setup-platform.mjs",
+    "dwt": "tsx packages/runner/src/cli.ts",
+    "cases:list": "pnpm dwt list",
+    "cases:validate": "pnpm dwt validate",
+    "case:preflight": "pnpm dwt preflight",
+    "case:run": "pnpm dwt run",
     "build": "pnpm -r build",
     "build:local": "pnpm -r --if-present build:local",
     "build:dev": "pnpm -r --if-present build:dev",
@@ -35,7 +59,8 @@
     "desktop:dist:mac:pkg": "pnpm --filter @ai-e2e/desktop run dist:mac:pkg",
     "desktop:dist:mac:zip": "pnpm --filter @ai-e2e/desktop run dist:mac:zip",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "ci:check": "pnpm typecheck && pnpm test && pnpm dwt validate"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

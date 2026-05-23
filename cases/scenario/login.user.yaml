@@ -2,6 +2,9 @@ case_id: login_user
 case_name: user 登录流程
 description: 打开 user 登录页，输入环境变量中的账号密码并提交。
 mode: web
+defaults:
+  step_timeout_ms: 20000
+  wait_for_network: true
 sessions:
   - name: user
     login_url: "${env.USER_LOGIN_URL}"

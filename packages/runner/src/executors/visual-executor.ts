@@ -53,7 +53,11 @@ export class VisualExecutor {
       ({ name, type, session, statusText }) => {
         const panel = document.getElementById("ai-e2e-step-panel");
         if (panel) {
-          panel.innerHTML = `<strong>${name}</strong><span>${type} · ${session ?? "-"} · ${statusText}</span>`;
+          const title = document.createElement("strong");
+          title.textContent = name;
+          const meta = document.createElement("span");
+          meta.textContent = `${type} · ${session ?? "-"} · ${statusText}`;
+          panel.replaceChildren(title, meta);
         }
       },
       { name: step.name, type: step.type, session: step.session, statusText: status }

@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { Alert, Card, Col, Row, Space, Tabs, message } from "antd";
+import { Alert, Card, Col, Row, Space, Tabs, Tag, message } from "antd";
 import { useNavigate } from "react-router-dom";
-import { getDbHealth, getDowaletContext } from "../../api/context";
+import { getAppContext, getDbHealth } from "../../api/context";
 import { listCases } from "../../api/cases";
-import { listRunHistory } from "../../api/reports";
 import { createTestRun, getTestRun, getTestRunLogs } from "../../api/testRuns";
 import { EnvSelector } from "../../components/EnvSelector";
 import { LogTerminal } from "../../components/LogTerminal";
@@ -15,7 +14,7 @@ import { appBrandName } from "../../config/brand";
 import { useCaseStore } from "../../stores/useCaseStore";
 import { useRunStore } from "../../stores/useRunStore";
 import { useSettingStore } from "../../stores/useSettingStore";
-import type { DbHealthResult, DowaletContextSummary } from "../../types/context";
+import type { DbHealthResult, AppAuthSourceSummary, AppContextSummary, AppRouteNode } from "../../types/context";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -24,39 +23,14 @@ export default function Dashboard() {
   const { env, setEnv } = useSettingStore();
   const { run, logs, setSummary, setLogs, reset } = useRunStore();
   const [loadingCase, setLoadingCase] = useState("");
-  const [context, setContext] = useState<DowaletContextSummary>();
+  const [context, setContext] = useState<AppContextSummary>();
   const [dbHealth, setDbHealth] = useState<DbHealthResult>();
 
   useEffect(() => {
     listCases().then(setCases).catch((error) => messageApi.error(error.message));
-    getDowaletContext().then(setContext).catch(() => undefined);
+    getAppContext().then(setContext).catch(() => undefined);
     getDbHealth().then(setDbHealth).catch(() => undefined);
   }, [messageApi, setCases]);
-
-  useEffect(() => {
-    if (run) return;
-    let canceled = false;
-
-    listRunHistory()
-      .then((history) => {
-        if (canceled) return;
-        const latest = history[0];
-        if (!latest) {
-          return undefined;
-        }
-        return getTestRun(latest.runId);
-      })
-      .then((latestRun) => {
-        if (!canceled && latestRun) {
-          setSummary(latestRun);
-        }
-      })
-      .catch(() => undefined);
-
-    return () => {
-      canceled = true;
-    };
-  }, [run, setSummary]);
 
   useEffect(() => {
     if (!run?.runId || logs.length) return;
@@ -103,7 +77,7 @@ export default function Dashboard() {
 
       <Row gutter={[10, 10]} className="min-h-0 flex-1 overflow-y-auto xl:overflow-hidden">
         <Col xs={24} xl={15} xxl={16} className="min-h-0 overflow-visible pr-0 xl:overflow-y-auto xl:overflow-x-hidden xl:pr-1">
-          <Space direction="vertical" size={10} className="w-full">
+          <Space orientation="vertical" size={10} className="w-full">
             <Card title="流程入口">
               <RunButtonGroup
                 cases={cases}
@@ -124,7 +98,7 @@ export default function Dashboard() {
               className="shrink-0"
               type={dbHealth?.enabled ? "success" : "warning"}
               showIcon
-              message="DB 连接"
+              title="DB 连接"
               description={dbHealth ? `${dbHealth.enabled ? "已启用" : "未启用"} · ${dbHealth.message}` : "检测中"}
             />
             <Card
@@ -133,18 +107,7 @@ export default function Dashboard() {
             >
               <Tabs
                 size="small"
-                items={[
-                  {
-                    key: "user",
-                    label: "user",
-                    children: <RouteSummary count={context?.user.routeCount} routes={context?.user.enterpriseRoutes.map((item) => item.title || item.path)} />
-                  },
-                  {
-                    key: "admin",
-                    label: "admin",
-                    children: <RouteSummary count={context?.admin.routeCount} routes={context?.admin.approvalRoutes.map((item) => item.title || item.path)} />
-                  }
-                ]}
+                items={buildContextTabs(context)}
               />
             </Card>
             <LogTerminal logs={logs} className="h-[620px] shrink-0" heightClassName="" />
@@ -155,13 +118,38 @@ export default function Dashboard() {
   );
 }
 
-function RouteSummary(props: { count?: number; routes?: string[] }) {
+function buildContextTabs(context?: AppContextSummary) {
+  const sources = context?.sources?.length ? context.sources : [context?.user, context?.admin].filter(Boolean) as AppAuthSourceSummary[];
+  return sources.map((summary) => ({
+    key: summary.source,
+    label: summary.source,
+    children: <RouteSummary summary={summary} routes={preferredRoutes(summary)} />
+  }));
+}
+
+function preferredRoutes(summary: AppAuthSourceSummary): AppRouteNode[] {
+  if (summary.source === "user" && summary.enterpriseRoutes.length) {
+    return summary.enterpriseRoutes;
+  }
+  if (summary.source === "admin" && summary.approvalRoutes.length) {
+    return summary.approvalRoutes;
+  }
+  return summary.routes;
+}
+
+function RouteSummary(props: { summary?: AppAuthSourceSummary; routes?: AppRouteNode[] }) {
+  const routes = props.routes?.length ? props.routes : props.summary?.routes ?? [];
+
   return (
     <div className="grid gap-2">
-      <strong>{props.count ?? 0} 条路由</strong>
-      {(props.routes ?? []).slice(0, 6).map((route, index) => (
-        <span key={`${route}-${index}`} className="truncate text-[#68758a]">
-          {route}
+      <div className="flex min-w-0 items-center gap-2">
+        <strong>{props.summary?.routeCount ?? 0} 条路由</strong>
+        {props.summary?.authFile ? <Tag className="m-0 max-w-[180px] truncate">{props.summary.authFile}</Tag> : null}
+      </div>
+      {props.summary?.routeSourceKey ? <span className="truncate text-xs text-[#8a95a6]">{props.summary.routeSourceKey}</span> : null}
+      {routes.slice(0, 6).map((route, index) => (
+        <span key={`${route.fullPath || route.path || route.title}-${index}`} className="truncate text-[#68758a]">
+          {route.title || route.fullPath || route.path || route.name}
         </span>
       ))}
     </div>

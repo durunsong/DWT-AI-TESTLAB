@@ -2,9 +2,10 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { buildFailureAnalysisMessages, OpenAiCompatibleClient } from "@ai-e2e/ai-generator";
-import { ScenarioOrchestrator } from "@ai-e2e/runner";
+import { resolveArtifactBaseDir, ScenarioOrchestrator, type PlatformArtifactKind, type PlatformConfig } from "@ai-e2e/runner";
 import { maskSensitive, type CreateTestRunRequest, type RunReport, type StepResult, type TestRunEvent, type TestRunSummary } from "@ai-e2e/shared";
 import { imageMimeType } from "./ai-screenshot";
+import type { AiReportService } from "./ai-report.service";
 import type { EnvConfigService } from "./env-config.service";
 import { normalizeTestEnv } from "./env-config.service";
 import { createNextRunId } from "./run-id";
@@ -16,7 +17,9 @@ export class TestRunService {
   constructor(
     private readonly runner: ScenarioOrchestrator,
     private readonly rootDir: string,
-    private readonly envConfigService?: EnvConfigService
+    private readonly envConfigService?: EnvConfigService,
+    private readonly platformConfig?: PlatformConfig,
+    private readonly aiReportService?: AiReportService
   ) {
     this.events.setMaxListeners(100);
   }
@@ -24,7 +27,7 @@ export class TestRunService {
   async start(request: CreateTestRunRequest): Promise<TestRunSummary> {
     const env = normalizeTestEnv(request.env);
     await this.envConfigService?.applyToProcess(env);
-    const runId = await createNextRunId(this.rootDir, request.caseId);
+    const runId = await createNextRunId(this.rootDir, request.caseId, this.platformConfig);
     const startedAt = new Date().toISOString();
     const summary: TestRunSummary = {
       runId,
@@ -155,12 +158,39 @@ export class TestRunService {
         content,
         generatedAt: new Date().toISOString()
       };
+      await this.aiReportService?.saveAnalysis({
+        runId: summary.runId,
+        caseId: summary.caseId,
+        caseName: summary.caseName,
+        env: summary.env,
+        stepId: failedStep.stepId,
+        stepName: failedStep.name,
+        source: "auto_failure",
+        status: "completed",
+        content,
+        screenshot: failedStep.screenshot,
+        generatedAt: failedStep.aiAnalysis.generatedAt
+      });
     } catch (error) {
+      const generatedAt = new Date().toISOString();
       failedStep.aiAnalysis = {
         status: "failed",
         error: error instanceof Error ? error.message : String(error),
-        generatedAt: new Date().toISOString()
+        generatedAt
       };
+      await this.aiReportService?.saveAnalysis({
+        runId: summary.runId,
+        caseId: summary.caseId,
+        caseName: summary.caseName,
+        env: summary.env,
+        stepId: failedStep.stepId,
+        stepName: failedStep.name,
+        source: "auto_failure",
+        status: "failed",
+        error: failedStep.aiAnalysis.error,
+        screenshot: failedStep.screenshot,
+        generatedAt
+      }).catch(() => undefined);
     }
 
     report.steps = summary.steps;
@@ -168,7 +198,11 @@ export class TestRunService {
     this.emit({ runId: summary.runId, type: "step_updated", status: "failed", step: failedStep, at: new Date().toISOString(), message: "AI 失败分析完成" });
   }
 
-  private async buildFailureAnalysis(summary: TestRunSummary, report: RunReport, failedStep: StepResult): Promise<string> {
+  private async buildFailureAnalysis(
+    summary: TestRunSummary,
+    report: RunReport,
+    failedStep: StepResult
+  ): Promise<string> {
     const [logsTail, scenarioYaml, locationYaml, imageDataUrl] = await Promise.all([
       readTail(report.artifacts.log),
       this.readScenarioYaml(summary.caseId),
@@ -176,7 +210,7 @@ export class TestRunService {
       readImageDataUrl(failedStep.screenshot)
     ]);
     const client = new OpenAiCompatibleClient({ temperature: 0.1 });
-    return client.chat(buildFailureAnalysisMessages({
+    const messages = buildFailureAnalysisMessages({
       imageDataUrl,
       runId: summary.runId,
       caseId: summary.caseId,
@@ -185,7 +219,8 @@ export class TestRunService {
       logsTail,
       scenarioYaml,
       locationYaml
-    }));
+    });
+    return client.chat(messages);
   }
 
   private async readScenarioYaml(caseId: string): Promise<string | undefined> {
@@ -231,8 +266,9 @@ export class TestRunService {
     };
   }
 
-  assetPath(...segments: string[]): string {
-    return path.resolve(this.rootDir, ...segments);
+  artifactPath(kind: PlatformArtifactKind, ...segments: string[]): string {
+    const baseDir = this.platformConfig ? resolveArtifactBaseDir(this.rootDir, this.platformConfig, kind) : path.resolve(this.rootDir, kind);
+    return path.resolve(baseDir, ...segments);
   }
 }
 

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { loadPlatformConfig, resolveArtifactBaseDir, type PlatformConfig } from "@ai-e2e/runner";
 
 const sequencePattern = /^(\d{4})_/;
 
@@ -19,13 +20,17 @@ export function formatRunId(sequence: number, caseId: string): string {
   return `${prefix}_${safeCaseId}_${Date.now().toString(36)}${crypto.randomUUID().slice(0, 4)}`;
 }
 
-export async function createNextRunId(rootDir: string, caseId: string): Promise<string> {
+export async function createNextRunId(rootDir: string, caseId: string, platformConfig = loadPlatformConfig(rootDir)): Promise<string> {
   const dirs = await Promise.all([
-    readEntryNames(path.resolve(rootDir, "screenshots")),
-    readEntryNames(path.resolve(rootDir, "reports")),
-    readEntryNames(path.resolve(rootDir, "logs"))
+    readEntryNames(artifactBaseDir(rootDir, platformConfig, "screenshots")),
+    readEntryNames(artifactBaseDir(rootDir, platformConfig, "reports")),
+    readEntryNames(artifactBaseDir(rootDir, platformConfig, "logs"))
   ]);
   return formatRunId(getNextRunSequence(dirs.flat()), caseId);
+}
+
+function artifactBaseDir(rootDir: string, platformConfig: PlatformConfig, kind: "logs" | "screenshots" | "reports"): string {
+  return resolveArtifactBaseDir(rootDir, platformConfig, kind);
 }
 
 async function readEntryNames(dir: string): Promise<string[]> {

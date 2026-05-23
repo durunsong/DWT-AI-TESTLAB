@@ -1,5 +1,5 @@
 export function appBrandName(): string {
-  return process.env.APP_BRAND_NAME || "AI E2E";
+  return process.env.APP_BRAND_NAME || "DWT Testing";
 }
 
 export function appProductName(): string {

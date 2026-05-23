@@ -1,5 +1,5 @@
 import { request } from "./request";
-import type { ArtifactKind, ArtifactSummary, ClearArtifactsResult, DeleteRunHistoryResult, RunHistoryItem, RunReport } from "../types/report";
+import type { AiRunReport, ArtifactFile, ArtifactKind, ArtifactSummary, ClearArtifactsResult, DeleteRunHistoryResult, RunHistoryItem, RunReport } from "../types/report";
 
 interface ApiResponse<T> {
   code: number;
@@ -11,6 +11,10 @@ export function getTestRunReport(runId: string): Promise<RunReport | null> {
   return request.get<unknown, RunReport | null>(`/test-runs/${runId}/report`);
 }
 
+export function getAiRunReport(runId: string): Promise<AiRunReport | null> {
+  return request.get<unknown, AiRunReport | null>(`/ai-reports/${runId}`);
+}
+
 export async function listRunHistory(): Promise<RunHistoryItem[]> {
   const result = await request.get<unknown, RunHistoryItem[] | ApiResponse<RunHistoryItem[]>>("/test-runs/history");
   return toArray(result);
@@ -18,6 +22,11 @@ export async function listRunHistory(): Promise<RunHistoryItem[]> {
 
 export async function getArtifactSummaries(): Promise<ArtifactSummary[]> {
   const result = await request.get<unknown, ArtifactSummary[] | ApiResponse<ArtifactSummary[]>>("/artifacts");
+  return toArray(result);
+}
+
+export async function listRunArtifactFiles(kind: ArtifactKind, runId: string): Promise<ArtifactFile[]> {
+  const result = await request.get<unknown, ArtifactFile[] | ApiResponse<ArtifactFile[]>>(`/artifacts/${kind}/${runId}/files`);
   return toArray(result);
 }
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildScreenshotAnalysisMessages } from "./screenshot-analysis";
+import { buildFailureAnalysisMessages, buildScreenshotAnalysisMessages } from "./screenshot-analysis";
 
 test("builds multimodal screenshot analysis messages with error context", () => {
   const messages = buildScreenshotAnalysisMessages({
@@ -15,4 +15,58 @@ test("builds multimodal screenshot analysis messages with error context", () => 
   assert.match(JSON.stringify(messages), /user_login/);
   assert.match(JSON.stringify(messages), /仍停留在登录页/);
   assert.match(JSON.stringify(messages), /data:image\/png;base64,abc/);
+});
+
+test("asks failure analysis to use API request parameters and action diagnostics", () => {
+  const messages = buildFailureAnalysisMessages({
+    runId: "run_1",
+    caseId: "admin_login",
+    env: "local",
+    failedStep: {
+      stepId: "click_login",
+      error: "登录失败",
+      data: {
+        diagnostics: {
+          recentActionDiagnostics: [{
+            kind: "input_value",
+            target: "admin_login_username",
+            protected: true,
+            matched: false
+          }],
+          recentApiResponses: [{
+            method: "POST",
+            url: "/login",
+            status: 200,
+            statusText: "OK",
+            ok: true,
+            requestPostData: "{\"username\":\"******\"}",
+            bodyText: "{\"code\":\"401\"}",
+            matchedAt: "2026-05-23T00:00:00.000Z"
+          }]
+        }
+      }
+    }
+  });
+
+  const payload = JSON.stringify(messages);
+  assert.match(payload, /接口请求参数/);
+  assert.match(payload, /动作诊断/);
+  assert.match(payload, /人工干预/);
+});
+
+test("asks failure analysis to include developer handoff fields", () => {
+  const messages = buildFailureAnalysisMessages({
+    runId: "run_1",
+    caseId: "case_1",
+    env: "local",
+    failedStep: {
+      stepId: "click_save",
+      error: "接口业务码不符合预期"
+    }
+  });
+
+  const payload = JSON.stringify(messages);
+  assert.match(payload, /开发处理摘要/);
+  assert.match(payload, /建议处理人/);
+  assert.match(payload, /复现方式/);
 });

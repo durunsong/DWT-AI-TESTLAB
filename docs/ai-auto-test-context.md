@@ -6,12 +6,9 @@ P0 只覆盖页面流程和页面断言，不依赖数据库。API 校验和 DB 
 
 ## `${APP_BRAND_NAME}` 业务上下文
 
-当前平台默认读取：
+当前平台在设置页维护业务路由来源，默认保留 user/admin 两个来源，也支持新增其他来源标识。导入或编辑后会保存到本地 `uploads/app-context/`，刷新页面后继续生效；工作台首页只展示只读摘要。
 
-- user 登录返回和路由表：`../front-end/dowalet-dev/ccc.json`
-- admin 登录返回和路由表：`../front-end/dowalet-dev/ddd.json`
-
-读取后只保留脱敏后的用户摘要、路由数量、企业/认证相关 user 路由、审批/审核相关 admin 路由。`token`、密码、cookie 等敏感字段不会进入接口响应、日志或报告。
+路由来源不限定为某个业务项目的登录返回。解析器支持登录返回里的 `data.auths`，也支持直接路由数组、JS/TS 路由模块、`routes`、`auths`、`menus`、`menuList` 等常见路由/菜单结构。读取后只保留脱敏后的用户摘要、路由数量、企业/认证相关 user 路由、审批/审核相关 admin 路由。`token`、密码、cookie 等敏感字段不会进入上下文摘要、日志或报告；原始上传内容仅用于本地查看和修改。
 
 ## DB 配置策略
 

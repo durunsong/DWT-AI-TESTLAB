@@ -20,6 +20,14 @@ export interface EnvFileConfig {
   missingKeys: string[];
 }
 
+export interface EnvFileContent {
+  env: TestEnv;
+  fileName: string;
+  exists: boolean;
+  updatedAt?: string;
+  content: string;
+}
+
 const ENV_FILE_BY_ENV: Record<TestEnv, string> = {
   local: ".env.local",
   dev: ".env",
@@ -93,6 +101,36 @@ export class EnvConfigService {
 
     await fs.writeFile(filePath, content, "utf8");
     this.applyToProcessFromVariables(normalized);
+    process.env.TEST_ENV = env;
+    return this.get(env);
+  }
+
+  async getContent(env: TestEnv): Promise<EnvFileContent> {
+    const filePath = this.filePath(env);
+    const [content, stat] = await Promise.all([
+      fs.readFile(filePath, "utf8").catch((error: unknown) => {
+        if (isNodeError(error) && error.code === "ENOENT") {
+          return undefined;
+        }
+        throw error;
+      }),
+      fs.stat(filePath).catch(() => undefined)
+    ]);
+
+    return {
+      env,
+      fileName: ENV_FILE_BY_ENV[env],
+      exists: content !== undefined,
+      updatedAt: stat?.mtime.toISOString(),
+      content: content ?? ""
+    };
+  }
+
+  async saveContent(env: TestEnv, content: string): Promise<EnvFileConfig> {
+    const normalizedContent = content.replace(/\r\n?/g, "\n");
+    const parsed = this.parseEnvContent(normalizedContent);
+    await fs.writeFile(this.filePath(env), normalizedContent, "utf8");
+    this.applyToProcessFromVariables(parsed.variables);
     process.env.TEST_ENV = env;
     return this.get(env);
   }

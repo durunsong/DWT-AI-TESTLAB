@@ -1,0 +1,23 @@
+shared_id: common/web_login
+name: 登录复用流程
+description: 打开指定 session 的登录页并执行 flow_login，账号密码继续引用 session/env 变量。
+tags: [login, user, admin]
+params:
+  session:
+    required: true
+    description: user 或 admin
+  url:
+    default: "${session.login_url}"
+    description: 登录入口 URL，通常传 "${session.login_url}"
+steps:
+  - step_id: open_login
+    name: 打开登录页
+    type: web_open
+    session: "${session}"
+    url: "${url}"
+  - step_id: login
+    name: 执行登录
+    type: flow_login
+    session: "${session}"
+    username: "${session.username}"
+    password: "${session.password}"

@@ -3,6 +3,10 @@
 interface ImportMetaEnv {
   readonly VITE_APP_BRAND_NAME?: string;
   readonly VITE_APP_PRODUCT_NAME?: string;
+  readonly VITE_APP_CONTEXT_BODY_LIMIT_MB?: string;
+  readonly VITE_APP_UPLOAD_MAX_MB?: string;
+  readonly VITE_APP_REQUEST_TIMEOUT_MS?: string;
+  readonly VITE_APP_STORAGE_KEY?: string;
   readonly VITE_API_BASE_URL?: string;
 }
 

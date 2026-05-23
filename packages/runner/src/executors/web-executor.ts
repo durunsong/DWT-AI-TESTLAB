@@ -16,10 +16,14 @@ import type { RunLogger } from "../utils/logger";
 import { buildLoginStillPendingMessage, isLoginUrl } from "./login-result";
 import { createLocatorPlans, type LocatorPlan } from "./locator-candidates";
 import type { VisualExecutor } from "./visual-executor";
+import { resolveUploadFilePath } from "../utils/upload-file";
+import { buildInputValueDiagnostic, type InputValueDiagnostic, type TrackedInput } from "./action-diagnostics";
 
 export class WebExecutor {
   private readonly recordedPages = new WeakSet<Page>();
   private readonly pageDiagnostics = new WeakMap<Page, ApiResponseDiagnostic[]>();
+  private readonly pageActionDiagnostics = new WeakMap<Page, InputValueDiagnostic[]>();
+  private readonly pageTrackedInputs = new WeakMap<Page, TrackedInput[]>();
 
   constructor(
     private readonly input: {
@@ -69,6 +73,9 @@ export class WebExecutor {
       case "web_input":
         await this.inputText(page, step);
         return { message: "输入完成" };
+      case "web_select":
+        await this.selectOption(page, step);
+        return { message: "选择完成" };
       case "web_upload":
         return this.withApiWait(page, step, async () => {
           await this.upload(page, step);
@@ -113,6 +120,7 @@ export class WebExecutor {
   async captureFailure(page: Page, stepId: string): Promise<Partial<StepResult>> {
     const screenshot = await this.screenshot(page, `${stepId}-failed`);
     const diagnostics = this.pageDiagnostics.get(page)?.slice(-10);
+    const actionDiagnostics = this.pageActionDiagnostics.get(page)?.slice(-20);
     if (diagnostics?.length) {
       await this.input.logger.error("失败时捕获到最近异常接口响应", { stepId, apiResponses: diagnostics });
     }
@@ -120,7 +128,14 @@ export class WebExecutor {
       screenshot,
       url: page.url(),
       title: await page.title().catch(() => ""),
-      data: diagnostics?.length ? { diagnostics: { recentApiResponses: diagnostics } } : undefined
+      data: diagnostics?.length || actionDiagnostics?.length
+        ? {
+          diagnostics: {
+            ...(diagnostics?.length ? { recentApiResponses: diagnostics } : {}),
+            ...(actionDiagnostics?.length ? { recentActionDiagnostics: actionDiagnostics } : {})
+          }
+        }
+        : undefined
     };
   }
 
@@ -264,6 +279,8 @@ export class WebExecutor {
 
   private async readApiResponse(response: Response): Promise<ApiResponseDiagnostic> {
     const contentType = response.headers()["content-type"];
+    const rawPostData = response.request().postData() ?? "";
+    const requestPostData = rawPostData ? redactSensitiveText(truncateText(rawPostData, 20_000)) : undefined;
     const rawText = await response.text().catch(() => "");
     const bodyText = redactSensitiveText(truncateText(rawText, 20_000));
     const bodyJson = parseJson(bodyText);
@@ -277,6 +294,8 @@ export class WebExecutor {
       failed: !response.ok() || businessFailure.failed,
       failureReason: !response.ok() ? `HTTP ${response.status()}` : businessFailure.reason,
       contentType,
+      requestPostData,
+      requestJson: requestPostData ? parseJson(requestPostData) : undefined,
       bodyText,
       bodyJson,
       matchedAt: new Date().toISOString()
@@ -295,6 +314,16 @@ export class WebExecutor {
       const usernameLocator = await this.locator(page, usernameStep);
       await this.input.visual.highlight(page, usernameLocator);
       await usernameLocator.fill(this.resolve(username), { timeout: this.timeoutMs(step) });
+      this.recordInputDiagnostic(page, buildInputValueDiagnostic({
+        phase: "after_input",
+        stepId: step.step_id,
+        stepName: step.name,
+        stepType: step.type,
+        target: usernameStep.target,
+        expectedValue: this.resolve(username),
+        actualValue: await readLocatorValue(usernameLocator)
+      }));
+      this.trackInput(page, { step: usernameStep, expectedValue: this.resolve(username) });
       await this.inputText(page, { ...step, target: `${prefix}_password`, value: this.resolve(password) });
       await this.click(page, { ...step, target: `${prefix}_submit` });
       await this.completeOptionalDeviceVerification(page, step);
@@ -390,6 +419,16 @@ export class WebExecutor {
     const usernameLocator = await this.locator(page, usernameStep);
     await this.input.visual.highlight(page, usernameLocator);
     await usernameLocator.fill(adminSession.username ?? "", { timeout: 10_000 });
+    this.recordInputDiagnostic(page, buildInputValueDiagnostic({
+      phase: "after_input",
+      stepId: usernameStep.step_id,
+      stepName: usernameStep.name,
+      stepType: usernameStep.type,
+      target: usernameStep.target,
+      expectedValue: adminSession.username ?? "",
+      actualValue: await readLocatorValue(usernameLocator)
+    }));
+    this.trackInput(page, { step: usernameStep, expectedValue: adminSession.username ?? "" });
     await this.inputText(page, { type: "flow_login", target: "admin_login_password", value: adminSession.password } as ScenarioStep);
     await this.click(page, { type: "flow_login", target: "admin_login_submit" } as ScenarioStep);
 
@@ -439,10 +478,29 @@ export class WebExecutor {
   private async inputText(page: Page, step: ScenarioStep): Promise<void> {
     const locator = await this.locator(page, step);
     await this.input.visual.highlight(page, locator);
-    await locator.fill(this.resolve(step.value), { timeout: this.timeoutMs(step) });
+    const expectedValue = this.resolve(step.value);
+    await locator.fill(expectedValue, { timeout: this.timeoutMs(step) });
+    const actualValue = await readLocatorValue(locator);
+    this.recordInputDiagnostic(page, buildInputValueDiagnostic({
+      phase: "after_input",
+      stepId: step.step_id,
+      stepName: step.name,
+      stepType: step.type,
+      target: step.target,
+      expectedValue,
+      actualValue
+    }));
+    this.trackInput(page, { step, expectedValue });
+  }
+
+  private async selectOption(page: Page, step: ScenarioStep): Promise<void> {
+    const locator = await this.locator(page, step);
+    await this.input.visual.highlight(page, locator);
+    await locator.selectOption(this.resolve(step.value), { timeout: this.timeoutMs(step) });
   }
 
   private async click(page: Page, step: ScenarioStep): Promise<void> {
+    await this.recordTrackedInputsBeforeClick(page, step);
     const locator = await this.locator(page, step);
     await this.input.visual.highlight(page, locator);
     await this.input.visual.clickRipple(page, locator);
@@ -450,9 +508,10 @@ export class WebExecutor {
   }
 
   private async upload(page: Page, step: ScenarioStep): Promise<void> {
-    const locator = await this.locator(page, step);
-    await this.input.visual.highlight(page, locator);
-    await locator.setInputFiles(path.resolve(this.input.rootDir, this.resolve(step.file)), { timeout: this.timeoutMs(step) });
+    const locator = await this.uploadLocator(page, step);
+    await this.input.visual.highlight(page, locator).catch(() => undefined);
+    const filePath = resolveUploadFilePath(this.input.rootDir, this.resolve(step.file));
+    await locator.setInputFiles(filePath, { timeout: this.timeoutMs(step) });
   }
 
   private async assertText(page: Page, step: ScenarioStep): Promise<void> {
@@ -487,6 +546,49 @@ export class WebExecutor {
     return this.resolveInlineTarget(page, step);
   }
 
+  private async uploadLocator(page: Page, step: ScenarioStep): Promise<Locator> {
+    if (!step.target) {
+      throw new Error(`${step.type} 必须指定 target`);
+    }
+    const timeoutMs = this.timeoutMs(step);
+    const definition = this.input.locations[step.target];
+    if (definition) {
+      return this.resolveUploadLocatorPlans(page, createLocatorPlans(definition), timeoutMs);
+    }
+
+    const target = this.resolve(step.target);
+    return this.resolveUploadLocatorPlans(page, this.inlineTargetPlans(step.type, target), timeoutMs);
+  }
+
+  private async resolveUploadLocatorPlans(page: Page, plans: LocatorPlan[], timeoutMs: number): Promise<Locator> {
+    if (!plans.length) {
+      throw new Error("上传定位定义为空");
+    }
+    const perCandidateTimeout = Math.max(800, Math.min(2_000, Math.floor(timeoutMs / plans.length)));
+    const failures: string[] = [];
+
+    for (const plan of plans) {
+      const locator = this.buildLocator(page, plan).first();
+      try {
+        await locator.waitFor({ state: "attached", timeout: perCandidateTimeout });
+        if (await this.isFileInput(locator)) {
+          return locator;
+        }
+        const nestedInput = locator.locator("input[type='file']").first();
+        await nestedInput.waitFor({ state: "attached", timeout: perCandidateTimeout });
+        return nestedInput;
+      } catch {
+        failures.push(`${plan.kind}=${plan.value}`);
+      }
+    }
+
+    throw new Error(`未找到文件上传 input，已尝试：${failures.join(" -> ")}`);
+  }
+
+  private async isFileInput(locator: Locator): Promise<boolean> {
+    return locator.evaluate((element) => element instanceof HTMLInputElement && element.type === "file").catch(() => false);
+  }
+
   private async resolveInlineTarget(page: Page, step: ScenarioStep): Promise<Locator> {
     const target = this.resolve(step.target);
     const timeoutMs = this.timeoutMs(step);
@@ -519,17 +621,18 @@ export class WebExecutor {
       { kind: "text", value: target },
       { kind: "role", value: "button", name: target }
     ];
-    if (type === "web_input") {
+    if (type === "web_input" || type === "web_select") {
+      const formControl = type === "web_select" ? "select" : "input[not(@type='hidden')]";
       return [
         { kind: "label", value: target },
         { kind: "placeholder", value: target },
         {
           kind: "xpath",
-          value: `//*[normalize-space()=${xpathTarget}]/ancestor::*[contains(@class,'form-item') or contains(@class,'el-form-item') or self::label][1]//input[not(@type='hidden')]`
+          value: `//*[normalize-space()=${xpathTarget}]/ancestor::*[contains(@class,'form-item') or contains(@class,'el-form-item') or self::label][1]//${formControl}`
         },
         {
           kind: "xpath",
-          value: `//*[contains(normalize-space(),${xpathTarget})]/following::input[not(@type='hidden')][1]`
+          value: `//*[contains(normalize-space(),${xpathTarget})]/following::${formControl}[1]`
         },
         { kind: "text", value: target },
         { kind: "css", value: `[name="${target}"]` }
@@ -658,6 +761,48 @@ export class WebExecutor {
     await this.click(page, { ...base, target });
   }
 
+  private recordInputDiagnostic(page: Page, diagnostic: InputValueDiagnostic): void {
+    const diagnostics = this.pageActionDiagnostics.get(page) ?? [];
+    diagnostics.push(diagnostic);
+    this.pageActionDiagnostics.set(page, diagnostics.slice(-50));
+  }
+
+  private trackInput(page: Page, tracked: TrackedInput): void {
+    if (!tracked.step.target) {
+      return;
+    }
+    const inputs = this.pageTrackedInputs.get(page) ?? [];
+    const next = inputs.filter((item) => item.step.target !== tracked.step.target);
+    next.push(tracked);
+    this.pageTrackedInputs.set(page, next.slice(-20));
+  }
+
+  private async recordTrackedInputsBeforeClick(page: Page, clickStep: ScenarioStep): Promise<void> {
+    const trackedInputs = this.pageTrackedInputs.get(page)?.slice(-10) ?? [];
+    for (const tracked of trackedInputs) {
+      if (!tracked.step.target) {
+        continue;
+      }
+      const locator = await this.locator(page, { ...tracked.step, timeout_ms: Math.min(tracked.step.timeout_ms ?? 1_000, 1_000) }).catch(() => undefined);
+      if (!locator) {
+        continue;
+      }
+      const actualValue = await readLocatorValue(locator).catch(() => undefined);
+      if (actualValue === undefined) {
+        continue;
+      }
+      this.recordInputDiagnostic(page, buildInputValueDiagnostic({
+        phase: "before_click",
+        stepId: clickStep.step_id,
+        stepName: clickStep.name,
+        stepType: clickStep.type,
+        target: tracked.step.target,
+        expectedValue: tracked.expectedValue,
+        actualValue
+      }));
+    }
+  }
+
   private async screenshot(page: Page, name: string): Promise<string> {
     const filePath = path.resolve(this.input.screenshotDir, `${name}.png`);
     await page.screenshot({ path: filePath, fullPage: true });
@@ -702,6 +847,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function apiAssertionError(message: string, api: ApiResponseDiagnostic): Error {
   return Object.assign(new Error(message), { apiDiagnostic: api });
+}
+
+async function readLocatorValue(locator: Locator): Promise<string> {
+  return locator.evaluate((element) => {
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+      return element.value;
+    }
+    return element.textContent ?? "";
+  });
 }
 
 function truncateText(value: string, maxLength: number): string {

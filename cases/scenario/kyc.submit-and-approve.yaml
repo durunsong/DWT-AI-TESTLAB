@@ -2,6 +2,9 @@ case_id: kyc_submit_and_approve
 case_name: 企业认证 KYC 提交并由管理端审核
 description: user 端提交企业认证，admin 端审核通过，最后 user 端回查状态。
 mode: hybrid
+defaults:
+  step_timeout_ms: 20000
+  wait_for_network: true
 sessions:
   - name: user
     login_url: "${env.USER_LOGIN_URL}"

@@ -1,5 +1,6 @@
 import axios from "axios";
 import { getApiBaseUrl } from "./base-url";
+import { DEFAULT_REQUEST_TIMEOUT_MS } from "./timeouts";
 
 interface ApiResponse<T> {
   code: number;
@@ -9,7 +10,7 @@ interface ApiResponse<T> {
 
 export const request = axios.create({
   baseURL: getApiBaseUrl(),
-  timeout: 60000
+  timeout: Number(import.meta.env.VITE_APP_REQUEST_TIMEOUT_MS || DEFAULT_REQUEST_TIMEOUT_MS)
 });
 
 request.interceptors.response.use(

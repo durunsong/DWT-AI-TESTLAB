@@ -10,6 +10,7 @@ test("initialize records sessions without opening pages until they are requested
     headless: true,
     slowMo: 0,
     tracesDir: "traces",
+    defaultViewport: { width: 1920, height: 1080 },
     browserLauncher: async () => browser as unknown as Browser
   });
   const sessions: ScenarioSession[] = [
@@ -35,6 +36,7 @@ test("newPage replaces the managed page without leaving the previous page open",
     headless: true,
     slowMo: 0,
     tracesDir: "traces",
+    defaultViewport: { width: 1920, height: 1080 },
     browserLauncher: async () => browser as unknown as Browser
   });
 

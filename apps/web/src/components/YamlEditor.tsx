@@ -8,7 +8,7 @@ interface YamlEditorProps {
 export function YamlEditor({ value, onChange }: YamlEditorProps) {
   return (
     <Editor
-      height="calc(100vh - 260px)"
+      height="calc(100vh - 320px)"
       defaultLanguage="yaml"
       language="yaml"
       theme="vs-dark"

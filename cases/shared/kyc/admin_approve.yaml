@@ -1,0 +1,14 @@
+shared_id: kyc/admin_approve
+name: KYC 后台审核通过
+description: admin session 登录后执行 KYC 审核通过流程，适合用户提交后的端到端用例复用。
+tags: [kyc, admin, approve]
+params:
+  session:
+    default: admin
+    description: 执行审核的后台 session
+phases:
+  mainSteps:
+    - step_id: approve_kyc
+      name: 审核通过 KYC
+      type: flow_admin_approve_kyc
+      session: "${session}"

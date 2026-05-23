@@ -1,6 +1,7 @@
 export * from "./context/context-manager";
 export * from "./context/runtime-context";
-export * from "./business/dowalet-context";
+export * from "./business/app-context";
+export * from "./config/platform-config";
 export * from "./executors/api-executor";
 export * from "./executors/db-executor";
 export * from "./executors/visual-executor";
@@ -9,6 +10,7 @@ export * from "./loader/location-loader";
 export * from "./loader/scenario-loader";
 export * from "./loader/yaml-loader";
 export * from "./orchestrator/scenario-orchestrator";
+export * from "./preflight/scenario-preflight";
 export * from "./recorder/codegen-converter";
 export * from "./report/report-builder";
 export * from "./session/session-manager";

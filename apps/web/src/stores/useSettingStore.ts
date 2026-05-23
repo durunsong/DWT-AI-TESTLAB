@@ -14,6 +14,7 @@ interface SettingState {
   setScreenshot: (screenshot: boolean) => void;
 }
 
+const storageKey = import.meta.env.VITE_APP_STORAGE_KEY || "dwt-testing-settings";
 const saved = readSettings();
 
 export const useSettingStore = create<SettingState>((set) => ({
@@ -32,13 +33,13 @@ export const useSettingStore = create<SettingState>((set) => ({
 function setAndPersist(set: (partial: Partial<SettingState>) => void, partial: Partial<SettingState>) {
   set(partial);
   const current = { ...readSettings(), ...partial };
-  window.localStorage.setItem("ai-e2e-settings", JSON.stringify(current));
+  window.localStorage.setItem(storageKey, JSON.stringify(current));
 }
 
 function readSettings(): Partial<SettingState> {
   if (typeof window === "undefined") return {};
   try {
-    return JSON.parse(window.localStorage.getItem("ai-e2e-settings") || "{}") as Partial<SettingState>;
+    return JSON.parse(window.localStorage.getItem(storageKey) || "{}") as Partial<SettingState>;
   } catch {
     return {};
   }

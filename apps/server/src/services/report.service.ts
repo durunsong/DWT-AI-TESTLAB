@@ -1,13 +1,20 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { RunReport, TestRunSummary } from "@ai-e2e/shared";
+import { resolveArtifactBaseDir, platformArtifactKinds, type PlatformArtifactKind, type PlatformConfig } from "@ai-e2e/runner";
+import type { DeveloperHandoffSummary, RunReport, TestRunSummary } from "@ai-e2e/shared";
 
-export type ArtifactKind = "logs" | "screenshots" | "reports" | "traces";
+export type ArtifactKind = PlatformArtifactKind | "ai-reports";
 
 export interface ArtifactSummary {
   kind: ArtifactKind;
   path: string;
   count: number;
+  sizeBytes: number;
+}
+
+export interface ArtifactFile {
+  name: string;
+  path: string;
   sizeBytes: number;
 }
 
@@ -29,6 +36,7 @@ export interface RunHistoryItem {
     json: string;
     logs: string;
   };
+  developerSummary?: DeveloperHandoffSummary;
 }
 
 export interface DeleteRunHistoryResult {
@@ -38,17 +46,20 @@ export interface DeleteRunHistoryResult {
 }
 
 export class ReportService {
-  constructor(private readonly rootDir: string) {}
+  constructor(
+    private readonly rootDir: string,
+    private readonly platformConfig?: PlatformConfig
+  ) {}
 
   async readJsonReport(runId: string): Promise<unknown> {
     const safeRunId = await this.resolveRunId(runId);
-    const file = path.resolve(this.rootDir, "reports", `${safeRunId}.json`);
+    const file = path.resolve(this.artifactDir("reports"), `${safeRunId}.json`);
     return JSON.parse(await fs.readFile(file, "utf8"));
   }
 
   async readLog(runId: string): Promise<string> {
     const safeRunId = await this.resolveRunId(runId);
-    const file = path.resolve(this.rootDir, "logs", `${safeRunId}.log`);
+    const file = path.resolve(this.artifactDir("logs"), `${safeRunId}.log`);
     return fs.readFile(file, "utf8");
   }
 
@@ -62,18 +73,41 @@ export class ReportService {
     const files = await fs.readdir(reportsDir).catch(() => []);
     const jsonFiles = files.filter((file) => file.endsWith(".json"));
     const items = await Promise.all(
-      jsonFiles.map(async (file) => {
-        const report = JSON.parse(await fs.readFile(path.resolve(reportsDir, file), "utf8")) as RunReport;
-        return this.toHistoryItem(report);
-      })
+      jsonFiles.map((file) => this.readHistoryItem(path.resolve(reportsDir, file)))
     );
 
-    return items.sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
+    return items
+      .filter((item): item is RunHistoryItem => Boolean(item))
+      .sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
   }
 
   async artifactSummaries(): Promise<ArtifactSummary[]> {
-    const kinds: ArtifactKind[] = ["logs", "screenshots", "reports", "traces"];
+    const kinds: ArtifactKind[] = ["logs", "screenshots", "reports", "traces", "ai-reports"];
     return Promise.all(kinds.map((kind) => this.artifactSummary(kind)));
+  }
+
+  async listArtifactFiles(kind: ArtifactKind, runId: string): Promise<ArtifactFile[]> {
+    if (!this.isArtifactKind(kind)) {
+      throw new Error(`不支持的产物类型：${kind}`);
+    }
+    const safeRunId = await this.resolveRunId(runId);
+    const dir = path.resolve(this.artifactDir(kind), safeRunId);
+    this.assertInsideRoot(dir);
+    const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+    const files = await Promise.all(
+      entries
+        .filter((entry) => entry.isFile())
+        .map(async (entry) => {
+          const filePath = path.resolve(dir, entry.name);
+          return {
+            name: entry.name,
+            path: `/${kind}/${safeRunId}/${entry.name}`,
+            sizeBytes: (await fs.stat(filePath)).size
+          };
+        })
+    );
+
+    return files.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async clearArtifacts(kinds: ArtifactKind[]): Promise<{ cleared: ArtifactSummary[]; remaining: ArtifactSummary[] }> {
@@ -102,7 +136,8 @@ export class ReportService {
       path.resolve(this.artifactDir("reports"), `${safeRunId}.html`),
       path.resolve(this.artifactDir("logs"), `${safeRunId}.log`),
       path.resolve(this.artifactDir("screenshots"), safeRunId),
-      path.resolve(this.artifactDir("traces"), safeRunId)
+      path.resolve(this.artifactDir("traces"), safeRunId),
+      path.resolve(this.artifactDir("ai-reports"), safeRunId)
     ];
     const files: string[] = [];
 
@@ -133,7 +168,8 @@ export class ReportService {
         html: `/reports/${report.runId}.html`,
         json: `/api/test-runs/${report.runId}/report`,
         logs: `/api/test-runs/${report.runId}/logs`
-      }
+      },
+      developerSummary: report.developerSummary
     };
   }
 
@@ -189,7 +225,11 @@ export class ReportService {
     if (!this.isArtifactKind(kind)) {
       throw new Error(`不支持的产物类型：${kind}`);
     }
-    const dir = path.resolve(this.rootDir, kind);
+    const dir = kind === "ai-reports"
+      ? path.resolve(this.rootDir, "ai-reports")
+      : this.platformConfig
+        ? resolveArtifactBaseDir(this.rootDir, this.platformConfig, kind)
+        : path.resolve(this.rootDir, kind);
     this.assertInsideRoot(dir);
     return dir;
   }
@@ -231,6 +271,15 @@ export class ReportService {
   }
 
   private isArtifactKind(value: string): value is ArtifactKind {
-    return ["logs", "screenshots", "reports", "traces"].includes(value);
+    return value === "ai-reports" || platformArtifactKinds.includes(value as PlatformArtifactKind);
+  }
+
+  private async readHistoryItem(filePath: string): Promise<RunHistoryItem | undefined> {
+    try {
+      const report = JSON.parse(await fs.readFile(filePath, "utf8")) as RunReport;
+      return this.toHistoryItem(report);
+    } catch {
+      return undefined;
+    }
   }
 }

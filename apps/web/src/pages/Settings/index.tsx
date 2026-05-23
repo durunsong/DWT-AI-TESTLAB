@@ -1,14 +1,18 @@
-import { ClearOutlined, DeleteOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Form, Input, InputNumber, Popconfirm, Space, Switch, Table, Tag, Upload, message } from "antd";
+import { ClearOutlined, DeleteOutlined, EditOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, UploadOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Popconfirm, Space, Switch, Table, Tag, Upload, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { RcFile } from "antd/es/upload";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { getEnvFile, importEnvFile, saveEnvFile } from "../../api/settings";
+import { getEnvFile, getEnvFileContent, importEnvFile, saveEnvFile, saveEnvFileContent } from "../../api/settings";
+import { deleteAppContextSource, getAppContext, getAppContextSource, saveAppContextSource } from "../../api/context";
 import { EnvSelector } from "../../components/EnvSelector";
 import { PageHeader } from "../../components/PageHeader";
 import { useSettingStore } from "../../stores/useSettingStore";
-import type { EnvFileConfig, EnvVariable } from "../../types/settings";
+import type { EnvFileConfig, EnvVariable, TestEnv } from "../../types/settings";
+import type { AppAuthSourceSummary, AppContextSourceDetail, AppContextSummary } from "../../types/context";
+
+const contextBodyLimitMb = Number(import.meta.env.VITE_APP_CONTEXT_BODY_LIMIT_MB || 5);
 
 export default function Settings() {
   const {
@@ -28,6 +32,19 @@ export default function Settings() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [envEditorOpen, setEnvEditorOpen] = useState(false);
+  const [envContent, setEnvContent] = useState("");
+  const [envContentLoading, setEnvContentLoading] = useState(false);
+  const [envContentSaving, setEnvContentSaving] = useState(false);
+  const [routeContext, setRouteContext] = useState<AppContextSummary>();
+  const [routeLoading, setRouteLoading] = useState(false);
+  const [routeSaving, setRouteSaving] = useState(false);
+  const [routeImportingSource, setRouteImportingSource] = useState("");
+  const [routeEditorOpen, setRouteEditorOpen] = useState(false);
+  const [routeSourceKey, setRouteSourceKey] = useState("");
+  const [routeFileName, setRouteFileName] = useState("");
+  const [routeDraft, setRouteDraft] = useState("");
+  const [routeDetail, setRouteDetail] = useState<AppContextSourceDetail>();
   const [messageApi, contextHolder] = message.useMessage();
 
   const sourceText = useMemo(
@@ -62,9 +79,24 @@ export default function Settings() {
     }
   };
 
+  const loadRouteContext = async () => {
+    setRouteLoading(true);
+    try {
+      setRouteContext(await getAppContext());
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "读取路由上下文失败");
+    } finally {
+      setRouteLoading(false);
+    }
+  };
+
   useEffect(() => {
     void loadConfig();
   }, [env]);
+
+  useEffect(() => {
+    void loadRouteContext();
+  }, []);
 
   const updateVariable = (index: number, patch: Partial<EnvVariable>) => {
     setVariables((items) =>
@@ -142,6 +174,40 @@ export default function Settings() {
     await persistVariables(variables, `已保存 ${config?.fileName ?? "环境文件"}`);
   };
 
+  const openEnvEditor = async () => {
+    setEnvEditorOpen(true);
+    setEnvContentLoading(true);
+    try {
+      const file = await getEnvFileContent(env);
+      setEnvContent(file.content);
+    } catch (error) {
+      setEnvEditorOpen(false);
+      messageApi.error(error instanceof Error ? error.message : "读取 env 文件失败");
+    } finally {
+      setEnvContentLoading(false);
+    }
+  };
+
+  const closeEnvEditor = () => {
+    setEnvEditorOpen(false);
+    setEnvContent("");
+  };
+
+  const handleSaveEnvContent = async () => {
+    setEnvContentSaving(true);
+    try {
+      const saved = await saveEnvFileContent(env, envContent);
+      setConfig(saved);
+      setVariables(saved.variables);
+      syncRunPreferences(saved.variables);
+      messageApi.success(`已保存 ${saved.fileName}`);
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "保存 env 文件失败");
+    } finally {
+      setEnvContentSaving(false);
+    }
+  };
+
   const handleImportEnvFile = async (file: RcFile) => {
     const maxSize = 1024 * 1024;
     if (file.size > maxSize) {
@@ -152,10 +218,14 @@ export default function Settings() {
     setImporting(true);
     try {
       const content = await file.text();
-      const saved = await importEnvFile(env, content);
+      const targetEnv = extractTargetEnv(content) ?? env;
+      const saved = await importEnvFile(targetEnv, content);
       const beforeKeys = new Set(variables.map((item) => item.key).filter(Boolean));
       const importedKeys = extractEnvKeys(content);
       const overwrittenCount = importedKeys.filter((key) => beforeKeys.has(key)).length;
+      if (targetEnv !== env) {
+        setEnv(targetEnv);
+      }
       setConfig(saved);
       setVariables(saved.variables);
       syncRunPreferences(saved.variables);
@@ -171,6 +241,112 @@ export default function Settings() {
 
   const handleClearVariables = async () => {
     await persistVariables([], `已清空 ${config?.fileName ?? "环境文件"} 中保存的变量`);
+  };
+
+  const openNewRouteSource = () => {
+    const existing = new Set((routeContext?.sources ?? []).map((source) => source.source));
+    let index = existing.size + 1;
+    let source = `source${index}`;
+    while (existing.has(source)) {
+      index += 1;
+      source = `source${index}`;
+    }
+    setRouteDetail(undefined);
+    setRouteSourceKey(source);
+    setRouteFileName(`${source}.json`);
+    setRouteDraft("[]");
+    setRouteEditorOpen(true);
+  };
+
+  const openRouteSource = async (source: string) => {
+    setRouteSaving(true);
+    setRouteEditorOpen(true);
+    try {
+      const detail = await getAppContextSource(source);
+      setRouteDetail(detail);
+      setRouteSourceKey(detail.source);
+      setRouteFileName(detail.fileName);
+      setRouteDraft(detail.content);
+    } catch (error) {
+      setRouteEditorOpen(false);
+      messageApi.error(error instanceof Error ? error.message : "读取路由来源失败");
+    } finally {
+      setRouteSaving(false);
+    }
+  };
+
+  const closeRouteSourceEditor = () => {
+    setRouteEditorOpen(false);
+    setRouteDetail(undefined);
+    setRouteSourceKey("");
+    setRouteFileName("");
+    setRouteDraft("");
+  };
+
+  const handleSaveRouteSource = async () => {
+    if (!isRouteSourceKey(routeSourceKey)) {
+      messageApi.error("路由来源标识只能使用字母开头的英文、数字、下划线或中划线，最长 64 位");
+      return;
+    }
+    if (!routeFileName.trim()) {
+      messageApi.error("文件名不能为空");
+      return;
+    }
+    setRouteSaving(true);
+    try {
+      const detail = await saveAppContextSource({
+        source: routeSourceKey,
+        fileName: routeFileName,
+        content: routeDraft
+      });
+      setRouteDetail(detail);
+      setRouteSourceKey(detail.source);
+      setRouteFileName(detail.fileName);
+      setRouteDraft(detail.content);
+      await loadRouteContext();
+      messageApi.success(`已保存并解析 ${detail.summary.routeCount} 条 ${detail.source} 路由`);
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "保存路由来源失败");
+    } finally {
+      setRouteSaving(false);
+    }
+  };
+
+  const handleImportRouteSource = async (source: string, file: RcFile) => {
+    const maxSize = contextBodyLimitMb * 1024 * 1024;
+    if (file.size > maxSize) {
+      messageApi.error(`路由文件不能超过 ${contextBodyLimitMb}MB`);
+      return Upload.LIST_IGNORE;
+    }
+
+    setRouteImportingSource(source);
+    try {
+      const detail = await saveAppContextSource({
+        source,
+        fileName: file.name,
+        content: await file.text()
+      });
+      await loadRouteContext();
+      messageApi.success(`已导入并解析 ${detail.summary.routeCount} 条 ${source} 路由`);
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "导入路由来源失败");
+    } finally {
+      setRouteImportingSource("");
+    }
+
+    return Upload.LIST_IGNORE;
+  };
+
+  const handleDeleteRouteSource = async (source: string) => {
+    setRouteLoading(true);
+    try {
+      setRouteContext(await deleteAppContextSource(source));
+      messageApi.success(`已删除 ${source} 路由来源`);
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : "删除路由来源失败");
+    } finally {
+      setRouteLoading(false);
+    }
   };
 
   const columns: ColumnsType<EnvVariable> = [
@@ -213,6 +389,57 @@ export default function Settings() {
         <Popconfirm title="删除这个变量？" okText="删除" cancelText="取消" onConfirm={() => removeVariable(index)}>
           <Button danger type="text" icon={<DeleteOutlined />} />
         </Popconfirm>
+      )
+    }
+  ];
+
+  const routeColumns: ColumnsType<AppAuthSourceSummary> = [
+    {
+      title: "来源",
+      dataIndex: "source",
+      width: 140,
+      render: (value: string) => <Tag className="mr-0">{value}</Tag>
+    },
+    {
+      title: "文件",
+      dataIndex: "authFile",
+      width: 220,
+      render: (value: string) => <span className="block truncate">{value || "-"}</span>
+    },
+    {
+      title: "路由",
+      dataIndex: "routeCount",
+      width: 110,
+      render: (value: number, record) => `${value} / ${record.visibleRouteCount}`
+    },
+    {
+      title: "解析位置",
+      dataIndex: "routeSourceKey",
+      render: (value: string | undefined) => <span className="block truncate text-slate-500">{value || "-"}</span>
+    },
+    {
+      title: "操作",
+      width: 260,
+      render: (_value, record) => (
+        <Space size={6}>
+          <Upload accept=".json,.js,.ts,.tsx" showUploadList={false} beforeUpload={(file) => handleImportRouteSource(record.source, file)}>
+            <Button size="small" icon={<UploadOutlined />} loading={routeImportingSource === record.source}>
+              导入
+            </Button>
+          </Upload>
+          <Button size="small" icon={<EditOutlined />} onClick={() => void openRouteSource(record.source)}>
+            查看修改
+          </Button>
+          <Popconfirm
+            title={`删除 ${record.source} 路由来源？`}
+            okText="删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+            onConfirm={() => void handleDeleteRouteSource(record.source)}
+          >
+            <Button size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
+        </Space>
       )
     }
   ];
@@ -272,9 +499,35 @@ export default function Settings() {
         </Card>
       </div>
       <Card
+        title="路由上下文来源"
+        extra={
+          <Space>
+            <Button icon={<PlusOutlined />} onClick={openNewRouteSource}>
+              新增来源
+            </Button>
+            <Button icon={<ReloadOutlined />} loading={routeLoading} onClick={loadRouteContext}>
+              重载
+            </Button>
+          </Space>
+        }
+      >
+        <Table
+          size="middle"
+          rowKey="source"
+          loading={routeLoading}
+          pagination={false}
+          columns={routeColumns}
+          dataSource={routeContext?.sources ?? []}
+          scroll={{ y: 260 }}
+        />
+      </Card>
+      <Card
         title="环境变量"
         extra={
           <Space>
+            <Button icon={<EditOutlined />} loading={envContentLoading} onClick={() => void openEnvEditor()}>
+              查看修改
+            </Button>
             <Upload accept=".env,.local,.txt" showUploadList={false} beforeUpload={handleImportEnvFile}>
               <Button icon={<ImportOutlined />} loading={importing}>
                 导入 env
@@ -309,7 +562,7 @@ export default function Settings() {
             showIcon
             type="info"
             className="mb-2.5"
-            message={`当前 ${config.fileName} 缺少 ${config.missingKeys.length} 个模板变量，已从基础配置或模板带入，保存后会写入当前环境文件。`}
+            title={`当前 ${config.fileName} 缺少 ${config.missingKeys.length} 个模板变量，已从基础配置或模板带入，保存后会写入当前环境文件。`}
           />
         ) : null}
         <Table
@@ -322,12 +575,83 @@ export default function Settings() {
           scroll={{ y: "calc(100vh - 520px)" }}
         />
       </Card>
+      <Drawer
+        title={`查看修改 ${config?.fileName ?? "env 文件"}`}
+        size={760}
+        open={envEditorOpen}
+        destroyOnClose
+        onClose={closeEnvEditor}
+        extra={
+          <Space>
+            <Button onClick={closeEnvEditor}>关闭</Button>
+            <Button type="primary" icon={<SaveOutlined />} loading={envContentSaving} onClick={() => void handleSaveEnvContent()}>
+              保存
+            </Button>
+          </Space>
+        }
+      >
+        <Space orientation="vertical" size={10} className="w-full">
+          <div className="flex items-center justify-between gap-3 text-sm text-slate-500">
+            <span>{config?.fileName ?? "env 文件"}</span>
+            <span>{config?.updatedAt ? new Date(config.updatedAt).toLocaleString() : "未创建"}</span>
+          </div>
+          <Input.TextArea
+            value={envContent}
+            disabled={envContentLoading || envContentSaving}
+            rows={28}
+            spellCheck={false}
+            className="font-mono"
+            placeholder="KEY=value"
+            onChange={(event) => setEnvContent(event.target.value)}
+          />
+        </Space>
+      </Drawer>
+      <Drawer
+        title={routeDetail ? `${routeDetail.source} 路由来源` : "新增路由来源"}
+        size={760}
+        open={routeEditorOpen}
+        destroyOnClose
+        onClose={closeRouteSourceEditor}
+        extra={
+          <Button type="primary" icon={<SaveOutlined />} loading={routeSaving} onClick={() => void handleSaveRouteSource()}>
+            保存并解析
+          </Button>
+        }
+      >
+        <Space orientation="vertical" size={10} className="w-full">
+          <div className="grid grid-cols-[180px_minmax(0,1fr)] gap-2.5">
+            <Input
+              value={routeSourceKey}
+              disabled={Boolean(routeDetail) || routeSaving}
+              placeholder="source"
+              onChange={(event) => setRouteSourceKey(event.target.value)}
+            />
+            <Input value={routeFileName} disabled={routeSaving} placeholder="路由来源文件名" onChange={(event) => setRouteFileName(event.target.value)} />
+          </div>
+          <Input.TextArea
+            value={routeDraft}
+            disabled={routeSaving}
+            rows={22}
+            spellCheck={false}
+            placeholder="粘贴 JSON、JS/TS 路由数组、menus/menuList/auths 等菜单树内容"
+            onChange={(event) => setRouteDraft(event.target.value)}
+          />
+          <div className="text-xs text-[#8a95a6]">
+            当前解析：{routeDetail?.summary.routeCount ?? 0} 条路由
+            {routeDetail?.updatedAt ? `，保存于 ${new Date(routeDetail.updatedAt).toLocaleString()}` : ""}
+          </div>
+        </Space>
+      </Drawer>
     </div>
   );
 }
 
 function isSensitiveKey(key: string): boolean {
   return /(password|token|secret|key|cookie|authorization|apikey)/i.test(key);
+}
+
+function isRouteSourceKey(source: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(source.trim());
 }
 
 function upsertVariableValue(variables: EnvVariable[], key: string, value: string): EnvVariable[] {
@@ -347,6 +671,16 @@ function extractEnvKeys(content: string): string[] {
     }
   }
   return [...keys];
+}
+
+function extractTargetEnv(content: string): TestEnv | undefined {
+  const match = content.match(/^\s*(?:export\s+)?TEST_ENV\s*=\s*(.+?)\s*$/m);
+  const value = match?.[1]?.trim().replace(/^['"]|['"]$/g, "");
+  return value && isTestEnv(value) ? value : undefined;
+}
+
+function isTestEnv(value: string): value is TestEnv {
+  return ["local", "dev", "sit", "prod"].includes(value);
 }
 
 function PreferenceItem({ title, value, children }: { title: string; value: string; children: ReactNode }) {

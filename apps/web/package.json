@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 4301 --strictPort",
+    "dev": "vite",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "build:local": "tsc -p tsconfig.json --noEmit && vite build --mode local",
     "build:dev": "tsc -p tsconfig.json --noEmit && vite build --mode dev",
     "build:sit": "tsc -p tsconfig.json --noEmit && vite build --mode sit",
     "build:prod": "tsc -p tsconfig.json --noEmit && vite build --mode prod",
+    "test": "tsx --test src/**/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

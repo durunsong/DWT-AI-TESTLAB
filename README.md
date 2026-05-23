@@ -1,18 +1,51 @@
-# AI 自动化测试平台
+# DWT Testing
 
-这是一个 `Node.js + TypeScript + Playwright + YAML DSL + Fastify + React + Electron` 的自动化测试平台，用于通过标准 YAML DSL 承载 `user/admin` 双端业务流程，支持 PC 网页版和 Windows / Linux / macOS 桌面端交付。
+DWT Testing 是一个可定制的 AI 辅助端到端测试平台模板，使用 `Node.js + TypeScript + Playwright + YAML DSL + Fastify + React + Electron` 构建。它的目标不是把测试写死在某个业务系统里，而是让团队能快速搭建自己的测试平台，用 YAML 描述业务流程，通过统一运行器执行 Web、API、DB 只读断言，并在 Web 控制台或桌面端查看报告、日志、截图和 trace。
 
-## 模块
+## 适合场景
 
-- `packages/shared`：类型、常量、Zod Schema、变量解析和脱敏工具。
-- `packages/runner`：YAML 加载、运行上下文、Playwright 会话、Web/Visual 执行器、编排器和报告生成。
-- `packages/ai-generator`：AI 生成 DSL 的 prompt、截图分析、用例草稿和校验能力。
-- `apps/server`：Fastify API，提供用例管理、运行触发、运行状态、SSE、报告、日志、设置和上下文接口。
-- `apps/web`：React PC 测试运行工作台。
-- `apps/desktop`：Electron 桌面端，内嵌启动 Fastify API，并加载 `apps/web` 构建产物。
-- `cases`：YAML 用例、定位文件和模板。
+- 把登录、审批、KYC、后台操作等长链路流程沉淀成可维护用例。
+- 让业务人员和测试人员能读懂 YAML，而不是直接维护 Playwright spec。
+- 同一套用例支持本地调试、CI 预检、真实浏览器回归和桌面端交付。
+- 接入 OpenAI 兼容模型，根据需求文档、页面资料或失败截图辅助生成和修复用例。
 
-## 本地开发
+## 能力概览
+
+- YAML DSL：统一描述 session、页面定位、变量、Web 步骤、API 步骤和 DB 只读断言。
+- Playwright Runner：支持多 session、截图、trace、慢放、无头/有头模式和可视化辅助执行。
+- API 测试：支持状态码、业务码、响应字段断言、变量提取和复用浏览器 session cookie。
+- DB 校验：只允许只读 SQL，用于关键流程后的落库核验。
+- Web 控制台：用例管理、运行工作台、历史记录、报告查看、运行设置。
+- 桌面端：Electron 封装，复用同一套 Web 控制台和 Fastify API。
+- AI 辅助：基于 OpenAI 兼容接口生成 DSL 草稿、定位建议和失败分析。
+- 复用能力库：`cases/shared/*.yaml` 可沉淀登录、上传、审核等共享流程，新增用例弹窗可勾选后让 AI 优先复用。
+
+## 项目结构
+
+```text
+apps/
+  server/       Fastify API
+  web/          React 控制台
+  desktop/      Electron 桌面端
+packages/
+  shared/       公共类型、常量、Zod Schema、变量解析、脱敏工具
+  runner/       YAML 加载、预检、执行器、编排器、报告生成
+  ai-generator/ AI 提示词、OpenAI 兼容客户端、截图分析和 DSL 生成
+cases/
+  scenario/     示例 scenario YAML
+  location/     页面定位 YAML
+  shared/       可复用流程能力 YAML
+  templates/    用例模板
+docs/           DSL、CI、预检、定制和扩展说明
+```
+
+## 快速开始
+
+环境要求：
+
+- Node.js 20+
+- pnpm 9+
+- Playwright 支持的浏览器环境
 
 安装依赖：
 
@@ -20,20 +53,27 @@
 pnpm install
 ```
 
-同时启动 API 和 Web：
+准备本地配置：
+
+```bash
+cp .env.example .env
+```
+
+只填写你要运行的能力所需变量。真实账号、密码、token、DB 密码和 AI Key 只放在本地 `.env` 或 CI Secret 中，不要提交。平台名称、端口、桌面端窗口、上传限制、上下文来源、运行产物目录和路由关键词等非敏感定制项统一放在 `platform.config.json`。
+
+也可以用初始化脚本生成自己的平台配置：
+
+```bash
+pnpm setup:platform --brand="你的团队" --product="你的测试平台" --user-login-url="https://example.com/user/login" --admin-login-url="https://example.com/admin/login"
+```
+
+启动 API 和 Web 控制台：
 
 ```bash
 pnpm dev
 ```
 
-单独启动：
-
-```bash
-pnpm --filter @ai-e2e/server dev
-pnpm --filter @ai-e2e/web dev
-```
-
-默认服务：
+默认地址：
 
 - API: `http://localhost:4300`
 - Web: `http://localhost:4301`
@@ -44,231 +84,126 @@ pnpm --filter @ai-e2e/web dev
 pnpm desktop:dev
 ```
 
-## PC 网页版打包
-
-PC 网页版会输出静态资源到 `apps/web/dist`：
+## CLI 用法
 
 ```bash
-pnpm web:build
+pnpm dwt list
+pnpm dwt validate [caseId|file]
+pnpm dwt preflight <caseId|file> [--env=local|dev|test|sit] [--no-env-file]
+pnpm dwt run <caseId> [--env=local|dev|test|sit] [--headless|--headed] [--no-env-file]
 ```
 
-按环境打包：
-
-```bash
-pnpm web:build:local
-pnpm web:build:dev
-pnpm web:build:sit
-pnpm web:build:prod
-```
-
-PC 网页版只包含前端静态资源，后端 API 需要单独启动或部署：
-
-```bash
-pnpm --filter @ai-e2e/server start
-```
-
-推荐部署方式：
-
-- Nginx 或静态资源服务托管 `apps/web/dist`。
-- 将 `/api`、`/reports`、`/screenshots`、`/traces` 反向代理到 Fastify API。
-- 如果前后端不同域名，在对应 `.env*` 中配置 `VITE_API_BASE_URL=http://后端地址/api` 后重新打包。
-
-## 桌面端打包
-
-桌面端基于 Electron：
-
-- 主进程启动本地 Fastify API。
-- 渲染进程加载 `apps/web/dist`。
-- 首次启动会把安装包内的 `cases` 和 `.env.example` 初始化到 Electron `userData/workspace`。
-- 不会打包或写入本地 `.env`、`.env.local` 等敏感配置文件。
-
-通用构建：
-
-```bash
-pnpm desktop:build
-```
-
-当前平台未压缩包：
-
-```bash
-pnpm desktop:pack
-```
-
-Windows 安装包：
-
-```bash
-pnpm desktop:dist:win
-```
-
-也可以按格式单独构建：
-
-```bash
-pnpm desktop:dist:win:exe
-pnpm desktop:dist:win:msi
-pnpm desktop:dist:win:portable
-```
-
-配置目标：
-
-```text
-dist/desktop/DWT Testing-1.0.1-win-x64-setup.exe
-dist/desktop/DWT Testing-1.0.1-win-x64-installer.msi
-dist/desktop/DWT Testing-1.0.1-win-x64-portable.exe
-dist/desktop/win-unpacked/DWT Testing.exe
-```
-
-说明：
-
-- `.exe` 安装包由 NSIS 生成。
-- `.msi` 面向 Windows Installer 分发场景。
-- `portable.exe` 为免安装便携版。
-
-Linux 安装包：
-
-```bash
-pnpm desktop:dist:linux
-```
-
-也可以按格式单独构建：
-
-```bash
-pnpm desktop:dist:linux:appimage
-pnpm desktop:dist:linux:deb
-pnpm desktop:dist:linux:rpm
-pnpm desktop:dist:linux:tar
-```
-
-配置目标：
-
-```text
-dist/desktop/DWT Testing-1.0.1-linux-x86_64.AppImage
-dist/desktop/DWT Testing-1.0.1-linux-x64.tar.gz
-dist/desktop/DWT Testing-1.0.1-linux-amd64.deb
-dist/desktop/DWT Testing-1.0.1-linux-x86_64.rpm
-```
-
-说明：
-
-- 建议在 Linux runner 上执行并做运行验证。
-- Windows 交叉构建 Linux 包会受到符号链接权限和 `fpm` 工具链限制。
-- `deb` / `rpm` 通常依赖 Linux 打包工具链，建议在 Linux CI 中产出。
-- `.AppImage` 建议在 Linux runner 上构建，避免 Windows 符号链接权限问题。
-
-macOS 安装包：
-
-```bash
-pnpm desktop:dist:mac
-```
-
-也可以按格式单独构建：
-
-```bash
-pnpm desktop:dist:mac:dmg
-pnpm desktop:dist:mac:pkg
-pnpm desktop:dist:mac:zip
-```
-
-配置目标：
-
-```text
-dist/desktop/DWT Testing-1.0.1-mac-*.dmg
-dist/desktop/DWT Testing-1.0.1-mac-*-installer.pkg
-dist/desktop/DWT Testing-1.0.1-mac-*.zip
-```
-
-说明：
-
-- macOS 安装包需要在 macOS runner 上构建和验证。
-- 当前配置未接入 Apple Developer 签名、公证和自定义图标。
-
-## 桌面端运行数据
-
-桌面端运行数据位于 Electron `userData/workspace` 下，常见路径如下：
-
-```text
-workspace/cases
-workspace/logs
-workspace/reports
-workspace/screenshots
-workspace/traces
-workspace/uploads
-workspace/.env.example
-```
-
-平台会补齐缺失的种子用例和定位文件，但不会覆盖用户已有 YAML。
-
-## 环境变量
-
-复制 `.env.example` 为 `.env` 后填写真实测试环境账号、密码、页面地址、AI 服务和 DB 信息。
-
-```bash
-cp .env.example .env
-```
-
-注意：
-
-- `.env`、`.env.local`、`.env.*` 不应提交。
-- 平台不会在日志和报告中明文输出敏感字段。
-- `TEST_ENV` 只允许 `local`、`dev`、`test`、`sit`，`prod` 和 `production` 会被拦截。
-
-## `${APP_BRAND_NAME}` 适配
-
-平台默认通过 `DOWALET_USER_AUTH_FILE` 和 `DOWALET_ADMIN_AUTH_FILE` 读取 `dowalet-dev` 登录后返回数据，提取企业认证、审批审核相关路由，用于辅助完善 YAML DSL 和页面定位。
-
-接口：
-
-```text
-GET /api/dowalet/context
-GET /api/db/health
-```
-
-DB 连接信息仅放在本地 `.env`。DB 执行器只允许只读查询，并会拦截危险 SQL。
-
-## 验证建议
-
-基础检查：
+常用质量检查：
 
 ```bash
 pnpm typecheck
-pnpm web:build
-pnpm desktop:build
+pnpm test
+pnpm dwt validate
+pnpm ci:check
 ```
 
-Windows 桌面端已验证项：
+## 配置中心
 
-- `pnpm desktop:dist:win` 可生成 NSIS `.exe`、MSI `.msi` 和 portable `.exe`。
-- `dist/desktop/win-unpacked/DWT Testing.exe` 可正常启动。
-- 页面可渲染，内嵌 API `/api/cases` 返回 `200`。
-- Windows runner 已验证 `pnpm --filter @ai-e2e/desktop typecheck`。
+`platform.config.json` 用于保存可提交的非敏感配置：
 
-Linux / macOS 需要在对应 runner 上补充：
+- `app`：品牌名和产品名。
+- `server`：API 监听地址、端口和 CORS 来源。
+- `web`：Web dev server 地址、端口、代理目标、请求超时、本地存储 key。
+- `desktop`：桌面端应用 ID、产品名、维护者、安装包命名、内置 API 端口和窗口尺寸。
+- `workspace.directories`：桌面端首次启动需要创建的工作目录。
+- `artifacts`：日志、报告、截图、trace 的本地目录。
+- `browser.defaultViewport`：Playwright 默认视口，仍可被 `BROWSER_VIEWPORT_WIDTH/HEIGHT` 覆盖。
+- `context`：设置页默认上下文来源和路由分组关键词。
+- `uploads`：上下文导入、AI 资料文件、用例附件目录/大小和文本截断限制。
 
-- Linux: `.AppImage`、`.deb`、`.rpm`、`.tar.gz` 安装包构建。
-- macOS: `.dmg`、`.pkg`、`.zip` 安装包构建。
-- 首次启动种子数据初始化。
-- 页面渲染。
-- `/api/cases`、`/api/settings/env-files`、`/api/test-runs/history` 等核心接口。
-- Playwright 浏览器环境是否可用。
+敏感配置仍然放在 `.env`，例如账号、密码、API token、DB 连接和 AI Key。
 
-## 常见问题
+## 示例用例
 
-### 桌面端空白页
+```yaml
+case_id: login_user
+case_name: 用户登录
+mode: web
+sessions:
+  - name: user
+    login_url: "${env.USER_LOGIN_URL}"
+    username: "${env.USER_USERNAME}"
+    password: "${env.USER_PASSWORD}"
+locations:
+  file: cases/location/login.user.yaml
+steps:
+  - step_id: open_login
+    name: 打开登录页
+    type: web_open
+    session: user
+    url: "${session.login_url}"
+  - step_id: login
+    name: 登录
+    type: flow_login
+    session: user
+    username: "${session.username}"
+    password: "${session.password}"
+```
 
-通常是 Web 资源路径不兼容 `file://`。当前已通过 `base: "./"` 和桌面端 hash router 适配。
+更多 DSL 说明见 [docs/dsl-design.md](docs/dsl-design.md)，新增用例流程见 [docs/how-to-add-case.md](docs/how-to-add-case.md)。
 
-### 桌面端接口返回 400
+## 业务上下文
 
-通常是运行目录缺少 `cases/scenario` 等种子目录。当前桌面端启动时会递归补齐缺失文件，不覆盖已有用例。
+平台支持在设置页导入路由、菜单或登录返回结构，用于辅助生成 YAML 和定位建议。接口为：
 
-### Playwright 浏览器不可用
+```text
+GET    /api/app/context
+GET    /api/app/context/sources/:source
+PUT    /api/app/context/sources/:source
+DELETE /api/app/context/sources/:source
+POST   /api/app/context/parse
+GET    /api/db/health
+```
 
-桌面端不会默认把本机 Playwright 浏览器缓存打进安装包。目标机器需要可用的 Playwright 浏览器环境，或在后续发布流程中增加内置浏览器资源策略。
+上下文数据默认写入 `uploads/app-context/`，用于本地调试和 AI 辅助生成，不应进入交付包。默认来源和路由分组关键词可在 `platform.config.json` 的 `context.defaultSources`、`context.routeGroups` 中调整。
 
-## 当前缺失的真实业务信息
+## 用例附件
 
-- user/admin 测试账号、密码。
-- 是否存在验证码或二次验证。
-- KYC 页面真实入口、字段、上传文件要求。
-- 审核成功后的真实文案和列表查询条件。
+YAML 中的 `web_upload.file` 使用项目相对路径。用例编辑页支持上传图片或任意格式附件，默认保存到 `uploads/cases/<caseId>/`，并可自动写入选中的 `web_upload` 步骤：
 
-这些信息缺失不会影响平台骨架启动，但会影响真实 Playwright 流程跑通。
+```yaml
+steps:
+  - step_id: upload_license
+    name: 上传营业执照
+    type: web_upload
+    session: user
+    target: kyc_license_upload
+    file: uploads/cases/kyc_submit/business-license.png
+```
+
+`platform.config.json` 中的 `uploads.caseAttachmentBaseDir` 和 `uploads.caseAttachmentMaxMb` 可调整保存目录和单文件大小。运行前预检会检查附件路径和文件是否存在。
+
+## 构建
+
+Web 静态构建：
+
+```bash
+pnpm web:build
+```
+
+桌面端构建：
+
+```bash
+pnpm desktop:build
+pnpm desktop:pack
+pnpm desktop:dist:win
+pnpm desktop:dist:linux
+pnpm desktop:dist:mac
+```
+
+Linux 和 macOS 安装包建议在对应系统的 CI runner 中构建和验证。当前默认未配置代码签名、公证或浏览器资源内置策略。
+
+## 定制入口
+
+- 平台定制说明与检查清单见 [docs/customization.md](docs/customization.md)。
+
+## 当前边界
+
+- 示例用例是模板，不包含任何真实业务账号或生产地址。
+- AI 生成结果需要人工审阅，尤其是资金、审批、状态流转和 DB 断言。
+- 桌面端不默认打包本机 Playwright 浏览器缓存，目标机器需要可用浏览器环境，或后续引入内置浏览器策略。

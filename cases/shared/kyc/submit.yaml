@@ -1,0 +1,14 @@
+shared_id: kyc/submit
+name: KYC 提交流程
+description: user session 登录后提交 KYC 的标准流程入口，具体字段由 flow_submit_kyc 执行器维护。
+tags: [kyc, user, submit]
+params:
+  session:
+    default: user
+    description: 提交 KYC 的用户端 session
+phases:
+  mainSteps:
+    - step_id: submit_kyc
+      name: 提交 KYC
+      type: flow_submit_kyc
+      session: "${session}"

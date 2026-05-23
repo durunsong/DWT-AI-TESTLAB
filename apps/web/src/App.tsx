@@ -20,6 +20,10 @@ export function App() {
   const [collapsed, setCollapsed] = useState(() => (typeof window === "undefined" ? false : window.innerWidth < 1280));
 
   useEffect(() => {
+    document.title = appProductName;
+  }, []);
+
+  useEffect(() => {
     const media = window.matchMedia("(max-width: 1279px)");
     const syncCollapsed = (event: MediaQueryListEvent | MediaQueryList) => {
       if (event.matches) setCollapsed(true);
@@ -45,7 +49,7 @@ export function App() {
             <BrandMark className="h-10 w-10 shrink-0" />
             {!collapsed ? (
               <div className="min-w-0 flex-1">
-                <Typography.Text className="!block !whitespace-nowrap !text-slate-400">AI 自动化测试平台</Typography.Text>
+                <Typography.Text className="!block !whitespace-nowrap !text-slate-400">AI自动化测试平台</Typography.Text>
                 <Typography.Title level={4} className="!mb-0 !mt-1 truncate !text-slate-50">
                   {appProductName}
                 </Typography.Title>

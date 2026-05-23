@@ -12,12 +12,20 @@ export async function registerSettingsRoutes(app: FastifyInstance, envConfigServ
     return ok(await envConfigService.get(normalizeTestEnv(request.params.env)));
   });
 
+  app.get<{ Params: { env: string } }>("/api/settings/env-files/:env/content", async (request) => {
+    return ok(await envConfigService.getContent(normalizeTestEnv(request.params.env)));
+  });
+
   app.put<{ Params: { env: string }; Body: { variables: Array<Pick<EnvVariable, "key" | "value" | "comment">> } }>(
     "/api/settings/env-files/:env",
     async (request) => {
       return ok(await envConfigService.save(normalizeTestEnv(request.params.env), request.body.variables ?? []));
     }
   );
+
+  app.put<{ Params: { env: string }; Body: { content?: string } }>("/api/settings/env-files/:env/content", async (request) => {
+    return ok(await envConfigService.saveContent(normalizeTestEnv(request.params.env), request.body.content ?? ""));
+  });
 
   app.post<{
     Params: { env: string };

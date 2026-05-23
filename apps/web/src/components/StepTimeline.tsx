@@ -16,7 +16,7 @@ export function StepTimeline({ steps }: StepTimelineProps) {
       items={steps.map((step, index) => ({
         key: `${step.stepId}-${index}`,
         color: color(step.status),
-        children: (
+        content: (
           <div className="grid gap-1">
             <strong>{step.name}</strong>
             <span className="text-xs text-[#68758a]">{step.stepId} · {step.type} · {formatTime(step.startedAt)} · {formatDuration(step.durationMs)}</span>

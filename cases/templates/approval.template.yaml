@@ -1,6 +1,9 @@
 case_id: approval_template
 case_name: 审核流程模板
 mode: hybrid
+defaults:
+  step_timeout_ms: 20000
+  wait_for_network: true
 sessions:
   - name: admin
     login_url: "${env.ADMIN_LOGIN_URL}"

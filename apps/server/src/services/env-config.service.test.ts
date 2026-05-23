@@ -37,6 +37,25 @@ test("EnvConfigService saves env files and applies selected env to process.env",
   assert.equal(process.env.USER_LOGIN_URL, "http://sit.local");
 });
 
+test("EnvConfigService reads and saves raw env file content", async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "env-config-"));
+  await fs.writeFile(path.join(rootDir, ".env.example"), "TEST_ENV=local\nUSER_LOGIN_URL=\n", "utf8");
+
+  const service = new EnvConfigService(rootDir);
+  const missing = await service.getContent("local");
+  assert.equal(missing.exists, false);
+  assert.equal(missing.content, "");
+
+  const saved = await service.saveContent("local", "# local env\nTEST_ENV=local\r\nUSER_LOGIN_URL=http://local.test\n");
+  const raw = await service.getContent("local");
+
+  assert.equal(saved.variables.find((item) => item.key === "USER_LOGIN_URL")?.value, "http://local.test");
+  assert.equal(raw.exists, true);
+  assert.match(raw.content, /USER_LOGIN_URL=http:\/\/local\.test/);
+  assert.equal(process.env.TEST_ENV, "local");
+  assert.equal(process.env.USER_LOGIN_URL, "http://local.test");
+});
+
 test("EnvConfigService imports env content over the saved environment file", async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "env-config-"));
   await fs.writeFile(path.join(rootDir, ".env.example"), "ADMIN_USERNAME=\nADMIN_PASSWORD=\nUSER_USERNAME=\nUSER_PASSWORD=\n", "utf8");

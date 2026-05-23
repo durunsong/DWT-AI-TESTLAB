@@ -1,5 +1,7 @@
-appId: com.dowsure.ai-e2e-testing
-productName: DWT Testing
+# Static fallback only. Desktop package scripts use electron-builder.config.cjs,
+# which reads ../../platform.config.json.
+appId: io.github.custom-test-platform.desktop
+productName: Custom Test Platform
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 asar: true
 npmRebuild: false
@@ -7,6 +9,7 @@ directories:
   output: ../../dist/desktop
 files:
   - dist/**/*
+  - assets/**/*
   - package.json
   - browsers.json
 extraResources:
@@ -30,11 +33,11 @@ mac:
   target:
     - dmg
     - pkg
-    - zip
+    - zip  
 linux:
   icon: assets/icon.png
   category: Development
-  maintainer: Dowsure <dev@dowsure.com>
+  maintainer: Custom Test Platform contributors
   target:
     - AppImage
     - deb

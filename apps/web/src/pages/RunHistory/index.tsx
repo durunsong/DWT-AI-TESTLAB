@@ -4,7 +4,6 @@ import { ClearOutlined, DeleteOutlined, FileTextOutlined, ReloadOutlined } from 
 import { Link } from "react-router-dom";
 import { clearArtifacts, deleteRunHistory, getArtifactSummaries, listRunHistory } from "../../api/reports";
 import { PageHeader } from "../../components/PageHeader";
-import { toArtifactUrl } from "../../utils/artifact-url";
 import type { ArtifactKind, ArtifactSummary, RunHistoryItem } from "../../types/report";
 import { formatDuration, formatTime } from "../../utils/format";
 
@@ -12,14 +11,15 @@ const artifactOptions: Array<{ label: string; value: ArtifactKind }> = [
   { label: "日志", value: "logs" },
   { label: "截图", value: "screenshots" },
   { label: "报告", value: "reports" },
-  { label: "Trace", value: "traces" }
+  { label: "Trace", value: "traces" },
+  { label: "AI 报告", value: "ai-reports" }
 ];
 
 export default function RunHistory() {
   const [messageApi, contextHolder] = message.useMessage();
   const [history, setHistory] = useState<RunHistoryItem[]>([]);
   const [artifacts, setArtifacts] = useState<ArtifactSummary[]>([]);
-  const [selectedKinds, setSelectedKinds] = useState<ArtifactKind[]>(["logs", "screenshots", "reports", "traces"]);
+  const [selectedKinds, setSelectedKinds] = useState<ArtifactKind[]>(["logs", "screenshots", "reports", "traces", "ai-reports"]);
   const [loadingArtifacts, setLoadingArtifacts] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -155,11 +155,11 @@ export default function RunHistory() {
             </Popconfirm>
             <Popconfirm
               title="清理全部运行产物"
-              description="将清空 logs、screenshots、reports 和 traces。历史报告入口也会被清空。"
+              description="将清空 logs、screenshots、reports、traces 和 AI 报告。历史报告入口也会被清空。"
               okText="全部清理"
               cancelText="取消"
               okButtonProps={{ danger: true, loading: clearing }}
-              onConfirm={() => handleClearArtifacts(["logs", "screenshots", "reports", "traces"])}
+              onConfirm={() => handleClearArtifacts(["logs", "screenshots", "reports", "traces", "ai-reports"])}
             >
               <Button danger type="primary" icon={<ClearOutlined />} loading={clearing}>
                 全部清理
@@ -186,6 +186,11 @@ export default function RunHistory() {
             { title: "用例", dataIndex: "caseName", width: 220, render: (value: string, record) => value || record.caseId },
             { title: "环境", dataIndex: "env", width: 90, render: (value: string) => <Tag>{value}</Tag> },
             { title: "状态", dataIndex: "status", width: 100, render: (value) => <Tag color={statusColor(value)}>{value}</Tag> },
+            {
+              title: "建议处理人",
+              width: 130,
+              render: (_, record) => record.developerSummary ? <Tag color={ownerColor(record.developerSummary.ownerHint)}>{ownerLabel(record.developerSummary.ownerHint)}</Tag> : "-"
+            },
             { title: "开始时间", dataIndex: "startedAt", width: 170, render: formatTime },
             { title: "耗时", dataIndex: "durationMs", width: 110, render: formatDuration },
             {
@@ -202,12 +207,12 @@ export default function RunHistory() {
                   <Link to={`/reports/${record.runId}`}>
                     <Button size="small" icon={<FileTextOutlined />}>报告</Button>
                   </Link>
-                  <Button size="small" onClick={() => window.open(toArtifactUrl(record.reportLinks.html), "_blank", "noopener,noreferrer")}>
-                    HTML
-                  </Button>
+                  <Link to={`/reports/${record.runId}?mode=html`}>
+                    <Button size="small">HTML</Button>
+                  </Link>
                   <Popconfirm
                     title="删除历史记录"
-                    description={`删除 ${record.runId} 对应的报告、日志、截图和 trace？`}
+                    description={`删除 ${record.runId} 对应的报告、日志、截图、trace 和 AI 报告？`}
                     okText="删除"
                     cancelText="取消"
                     okButtonProps={{ danger: true, loading: deletingRunId === record.runId }}
@@ -232,9 +237,18 @@ function artifactLabel(kind: ArtifactKind): string {
     logs: "日志",
     screenshots: "截图",
     reports: "报告",
-    traces: "Trace"
+    traces: "Trace",
+    "ai-reports": "AI 报告"
   };
   return labels[kind];
+}
+
+function ownerLabel(owner: NonNullable<RunHistoryItem["developerSummary"]>["ownerHint"]): string {
+  return ({ frontend: "前端开发", backend: "后端开发", test: "测试/自动化", environment: "环境/数据", unknown: "待确认" } as Record<NonNullable<RunHistoryItem["developerSummary"]>["ownerHint"], string>)[owner];
+}
+
+function ownerColor(owner: NonNullable<RunHistoryItem["developerSummary"]>["ownerHint"]): string {
+  return ({ frontend: "cyan", backend: "geekblue", test: "purple", environment: "orange", unknown: "default" } as Record<NonNullable<RunHistoryItem["developerSummary"]>["ownerHint"], string>)[owner];
 }
 
 function formatBytes(value?: number): string {

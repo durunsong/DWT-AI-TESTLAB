@@ -24,8 +24,12 @@ export async function registerTestRunRoutes(
     return ok(await reportService.artifactSummaries());
   });
 
+  app.get<{ Params: { kind: ArtifactKind; runId: string } }>("/api/artifacts/:kind/:runId/files", async (request) => {
+    return ok(await reportService.listArtifactFiles(request.params.kind, request.params.runId));
+  });
+
   app.post<{ Body: { kinds?: ArtifactKind[] } }>("/api/artifacts/clear", async (request) => {
-    const defaultKinds: ArtifactKind[] = ["logs", "screenshots", "reports", "traces"];
+    const defaultKinds: ArtifactKind[] = ["logs", "screenshots", "reports", "traces", "ai-reports"];
     const kinds = request.body.kinds?.length ? request.body.kinds : defaultKinds;
     return ok(await reportService.clearArtifacts(kinds));
   });
@@ -64,14 +68,24 @@ export async function registerTestRunRoutes(
   });
 
   app.get<{ Params: { runId: string; file: string } }>("/reports/:file", async (request, reply) => {
-    const filePath = testRunService.assetPath("reports", path.basename(request.params.file));
+    if (request.params.file === "favicon.png" || request.params.file === "favicon.ico") {
+      return reply.status(204).send();
+    }
+
+    const filePath = testRunService.artifactPath("reports", path.basename(request.params.file));
     reply.type(request.params.file.endsWith(".html") ? "text/html; charset=utf-8" : "application/json; charset=utf-8");
     return fs.readFile(filePath, "utf8");
   });
 
   app.get<{ Params: { runId: string; file: string } }>("/screenshots/:runId/:file", async (request, reply) => {
-    const filePath = testRunService.assetPath("screenshots", path.basename(request.params.runId), path.basename(request.params.file));
+    const filePath = testRunService.artifactPath("screenshots", path.basename(request.params.runId), path.basename(request.params.file));
     reply.type("image/png");
+    return fs.readFile(filePath);
+  });
+
+  app.get<{ Params: { runId: string; file: string } }>("/traces/:runId/:file", async (request, reply) => {
+    const filePath = testRunService.artifactPath("traces", path.basename(request.params.runId), path.basename(request.params.file));
+    reply.type("application/zip");
     return fs.readFile(filePath);
   });
 }

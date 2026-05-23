@@ -38,6 +38,32 @@ export interface CaseValidationResult {
   issues: CaseValidationIssue[];
 }
 
+export type PreflightSeverity = "error" | "warning";
+
+export interface CasePreflightIssue {
+  severity: PreflightSeverity;
+  code: string;
+  path: string;
+  message: string;
+}
+
+export interface CasePreflightResult {
+  runnable: boolean;
+  caseId?: string;
+  caseName?: string;
+  env: string;
+  summary: {
+    steps: number;
+    webSteps: number;
+    apiSteps: number;
+    dbSteps: number;
+    missingEnvVars: string[];
+    warnings: number;
+    errors: number;
+  };
+  issues: CasePreflightIssue[];
+}
+
 export interface SaveCaseResult {
   saved: boolean;
   caseId?: string;
@@ -45,8 +71,45 @@ export interface SaveCaseResult {
   validation: CaseValidationResult;
 }
 
+export interface CaseAttachmentResult {
+  name: string;
+  file: string;
+  sizeBytes: number;
+}
+
+export interface CaseAttachmentSearchResult {
+  kind: "file" | "directory";
+  name: string;
+  file: string;
+  sizeBytes?: number;
+}
+
+export interface SharedAbilityParam {
+  name: string;
+  required?: boolean;
+  defaultValue?: string;
+  description?: string;
+}
+
+export interface SharedAbility {
+  sharedId: string;
+  name: string;
+  description?: string;
+  tags: string[];
+  params: SharedAbilityParam[];
+  stepCount: number;
+  file: string;
+}
+
+export interface DeleteAttachmentResult {
+  deleted: boolean;
+  file: string;
+}
+
 export interface DeleteCaseResult {
   deleted: boolean;
   caseId: string;
   file: string;
+  attachmentsDeleted?: boolean;
+  attachmentsDir?: string;
 }

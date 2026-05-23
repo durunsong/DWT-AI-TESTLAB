@@ -456,7 +456,7 @@ export default function Dashboard() {
   return (
     <div style={{ padding: 24 }}>
       <Card title="AI 自动化测试平台">
-        <Space direction="vertical" size={24} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={24} style={{ width: '100%' }}>
           <Space>
             <span>测试环境：</span>
             <Select

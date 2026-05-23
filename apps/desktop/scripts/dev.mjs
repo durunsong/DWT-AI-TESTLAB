@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -7,7 +8,8 @@ const desktopDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".
 const rootDir = path.resolve(desktopDir, "../..");
 const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const node = process.execPath;
-const webUrl = process.env.DWT_DESKTOP_DEV_SERVER_URL ?? "http://127.0.0.1:4301";
+const platformConfig = readPlatformConfig();
+const webUrl = process.env.DWT_DESKTOP_DEV_SERVER_URL ?? `http://127.0.0.1:${platformConfig.web.port}`;
 
 const children = new Set();
 
@@ -88,4 +90,18 @@ function withoutElectronRunAsNode(env) {
   const nextEnv = { ...env };
   delete nextEnv.ELECTRON_RUN_AS_NODE;
   return nextEnv;
+}
+
+function readPlatformConfig() {
+  const fallback = { web: { port: 4301 } };
+  const configPath = path.resolve(rootDir, "platform.config.json");
+  if (!existsSync(configPath)) {
+    return fallback;
+  }
+  const raw = JSON.parse(readFileSync(configPath, "utf8"));
+  return {
+    web: {
+      port: raw.web?.port || fallback.web.port
+    }
+  };
 }

@@ -4,11 +4,24 @@ import path from "node:path";
 import process from "node:process";
 import { app, BrowserWindow, shell } from "electron";
 import { startServer, type StartedServer } from "../../server/src/index";
+import { loadPlatformConfig, platformArtifactKinds, resolveArtifactBaseDir, type PlatformConfig } from "@ai-e2e/runner";
 
 let mainWindow: BrowserWindow | undefined;
 let server: StartedServer | undefined;
+let desktopPlatformConfig: PlatformConfig | undefined;
 
-void app.whenReady().then(bootstrap);
+process.on("uncaughtException", (error) => {
+  void writeStartupError(error);
+});
+
+process.on("unhandledRejection", (reason) => {
+  const error = reason instanceof Error ? reason : new Error(String(reason));
+  void writeStartupError(error);
+});
+
+void app.whenReady().then(bootstrap).catch((error: unknown) => {
+  void writeStartupError(error instanceof Error ? error : new Error(String(error))).finally(() => app.quit());
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
@@ -18,7 +31,9 @@ app.on("window-all-closed", () => {
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    void createMainWindow();
+    if (desktopPlatformConfig) {
+      void createMainWindow(desktopPlatformConfig);
+    }
   }
 });
 
@@ -27,16 +42,17 @@ app.on("before-quit", () => {
 });
 
 async function bootstrap(): Promise<void> {
-  const runtimeRoot = await prepareRuntimeRoot();
+  const { runtimeRoot, platformConfig } = await prepareRuntimeRoot();
+  desktopPlatformConfig = platformConfig;
   preparePlaywrightRuntime();
   server = await startServer({
     rootDir: runtimeRoot,
     host: "127.0.0.1",
-    port: Number(process.env.DWT_DESKTOP_API_PORT ?? 0),
+    port: Number(process.env.DWT_DESKTOP_API_PORT ?? platformConfig.desktop.apiPort),
     logger: !app.isPackaged
   });
 
-  await createMainWindow();
+  await createMainWindow(platformConfig);
 }
 
 function preparePlaywrightRuntime(): void {
@@ -50,18 +66,21 @@ function preparePlaywrightRuntime(): void {
   }
 }
 
-async function createMainWindow(): Promise<void> {
+async function createMainWindow(platformConfig: PlatformConfig): Promise<void> {
   if (!server) {
     return;
   }
+  const windowConfig = platformConfig.desktop.window;
 
   mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 920,
-    minWidth: 1280,
-    minHeight: 760,
+    width: windowConfig.width,
+    height: windowConfig.height,
+    minWidth: windowConfig.minWidth,
+    minHeight: windowConfig.minHeight,
+    icon: desktopIconPath(),
     show: false,
-    title: "DWT Testing",
+    title: windowConfig.title,
+    autoHideMenuBar: !windowConfig.menuBarVisible,
     webPreferences: {
       preload: path.resolve(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -69,6 +88,11 @@ async function createMainWindow(): Promise<void> {
       sandbox: false
     }
   });
+
+  if (!windowConfig.menuBarVisible) {
+    mainWindow.setMenu(null);
+    mainWindow.setMenuBarVisibility(false);
+  }
 
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
@@ -95,25 +119,33 @@ async function createMainWindow(): Promise<void> {
   });
 }
 
-async function prepareRuntimeRoot(): Promise<string> {
+async function prepareRuntimeRoot(): Promise<{ runtimeRoot: string; platformConfig: PlatformConfig }> {
   const runtimeRoot = app.isPackaged
     ? path.resolve(app.getPath("userData"), "workspace")
     : findWorkspaceRoot(path.resolve(__dirname, "..", "..", ".."));
 
-  await ensureDirectories(runtimeRoot);
+  if (app.isPackaged) {
+    await fs.mkdir(runtimeRoot, { recursive: true });
+    await copyFileIfMissing(path.resolve(process.resourcesPath, "seed", "platform.config.json"), path.resolve(runtimeRoot, "platform.config.json"));
+  }
+
+  const platformConfig = loadPlatformConfig(runtimeRoot);
+  await ensureDirectories(runtimeRoot, platformConfig);
 
   if (app.isPackaged) {
     await seedRuntimeRoot(runtimeRoot);
   }
 
-  return runtimeRoot;
+  return { runtimeRoot, platformConfig };
 }
 
-async function ensureDirectories(runtimeRoot: string): Promise<void> {
+async function ensureDirectories(runtimeRoot: string, platformConfig: PlatformConfig): Promise<void> {
+  const directories = [
+    ...platformConfig.workspace.directories.map((name) => path.resolve(runtimeRoot, name)),
+    ...platformArtifactKinds.map((kind) => resolveArtifactBaseDir(runtimeRoot, platformConfig, kind))
+  ];
   await Promise.all(
-    ["cases", "logs", "reports", "screenshots", "traces", "uploads"].map((name) =>
-      fs.mkdir(path.resolve(runtimeRoot, name), { recursive: true })
-    )
+    directories.map((dir) => fs.mkdir(dir, { recursive: true }))
   );
 }
 
@@ -121,6 +153,7 @@ async function seedRuntimeRoot(runtimeRoot: string): Promise<void> {
   const seedDir = path.resolve(process.resourcesPath, "seed");
   await copyMissingEntries(path.resolve(seedDir, "cases"), path.resolve(runtimeRoot, "cases"));
   await copyFileIfMissing(path.resolve(seedDir, ".env.example"), path.resolve(runtimeRoot, ".env.example"));
+  await copyFileIfMissing(path.resolve(seedDir, "platform.config.json"), path.resolve(runtimeRoot, "platform.config.json"));
 }
 
 async function copyMissingEntries(source: string, target: string): Promise<void> {
@@ -169,6 +202,11 @@ function getWebDistDir(): string {
   return path.resolve(findWorkspaceRoot(path.resolve(__dirname, "..", "..", "..")), "apps", "web", "dist");
 }
 
+function desktopIconPath(): string {
+  const iconFile = process.platform === "win32" ? "icon.ico" : "icon.png";
+  return path.resolve(__dirname, "..", "assets", iconFile);
+}
+
 function findWorkspaceRoot(startDir: string): string {
   let current = path.resolve(startDir);
   while (true) {
@@ -185,4 +223,14 @@ function findWorkspaceRoot(startDir: string): string {
 
 function pathExistsSync(target: string): boolean {
   return existsSync(target);
+}
+
+async function writeStartupError(error: Error): Promise<void> {
+  const logDir = path.resolve(app.getPath("userData"), "logs");
+  await fs.mkdir(logDir, { recursive: true });
+  await fs.appendFile(
+    path.resolve(logDir, "desktop-main.log"),
+    `[${new Date().toISOString()}] ${error.stack ?? error.message}\n`,
+    "utf8"
+  );
 }

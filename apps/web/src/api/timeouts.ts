@@ -1,0 +1,3 @@
+export const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
+export const AI_REQUEST_TIMEOUT_MS = 60_000;
+export const AI_REQUEST_OPTIONS = { timeout: AI_REQUEST_TIMEOUT_MS };
