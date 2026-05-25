@@ -12,6 +12,7 @@ uploads/app-context/
 uploads/**/*
 screenshots/**/*
 traces/**/*
+videos/**/*
 test-results/
 playwright-report/
 apps/desktop/browsers.json

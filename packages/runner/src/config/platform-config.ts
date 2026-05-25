@@ -58,10 +58,11 @@ export interface PlatformConfig {
     materialSourceMaxChars: number;
     materialLinkMaxChars: number;
   };
+  caseTypes: PlatformCaseType[];
 }
 
 export const platformConfigFileName = "platform.config.json";
-export const platformArtifactKinds = ["logs", "screenshots", "reports", "traces"] as const;
+export const platformArtifactKinds = ["logs", "screenshots", "reports", "traces", "videos"] as const;
 
 export type PlatformArtifactKind = (typeof platformArtifactKinds)[number];
 
@@ -70,7 +71,24 @@ export interface PlatformArtifactDirs {
   reportsDir: string;
   screenshotsDir: string;
   tracesDir: string;
+  videosDir: string;
 }
+
+export interface PlatformCaseType {
+  key: string;
+  label: string;
+  enabled: boolean;
+  sort: number;
+  description?: string;
+}
+
+export const defaultCaseType: PlatformCaseType = {
+  key: "uncategorized",
+  label: "未分类",
+  enabled: true,
+  sort: 0,
+  description: "默认类型，用于兼容未配置类型的历史用例。"
+};
 
 export const defaultPlatformConfig: PlatformConfig = {
   app: {
@@ -105,13 +123,14 @@ export const defaultPlatformConfig: PlatformConfig = {
     }
   },
   workspace: {
-    directories: ["cases", "logs", "reports", "screenshots", "traces", "uploads"]
+    directories: ["cases", "logs", "reports", "screenshots", "traces", "videos", "uploads"]
   },
   artifacts: {
     logsDir: "logs",
     reportsDir: "reports",
     screenshotsDir: "screenshots",
-    tracesDir: "traces"
+    tracesDir: "traces",
+    videosDir: "videos"
   },
   browser: {
     defaultViewport: {
@@ -133,7 +152,8 @@ export const defaultPlatformConfig: PlatformConfig = {
     caseAttachmentBaseDir: "uploads/cases",
     materialSourceMaxChars: 18_000,
     materialLinkMaxChars: 24_000
-  }
+  },
+  caseTypes: [defaultCaseType]
 };
 
 export function loadPlatformConfig(rootDir = process.cwd()): PlatformConfig {
@@ -226,7 +246,8 @@ function mergePlatformConfig(input: Record<string, unknown>): PlatformConfig {
       logsDir: stringValue(artifacts.logsDir, defaultPlatformConfig.artifacts.logsDir),
       reportsDir: stringValue(artifacts.reportsDir, defaultPlatformConfig.artifacts.reportsDir),
       screenshotsDir: stringValue(artifacts.screenshotsDir, defaultPlatformConfig.artifacts.screenshotsDir),
-      tracesDir: stringValue(artifacts.tracesDir, defaultPlatformConfig.artifacts.tracesDir)
+      tracesDir: stringValue(artifacts.tracesDir, defaultPlatformConfig.artifacts.tracesDir),
+      videosDir: stringValue(artifacts.videosDir, defaultPlatformConfig.artifacts.videosDir)
     },
     browser: {
       defaultViewport: {
@@ -248,7 +269,8 @@ function mergePlatformConfig(input: Record<string, unknown>): PlatformConfig {
       caseAttachmentBaseDir: stringValue(uploads.caseAttachmentBaseDir, defaultPlatformConfig.uploads.caseAttachmentBaseDir),
       materialSourceMaxChars: numberValue(uploads.materialSourceMaxChars, defaultPlatformConfig.uploads.materialSourceMaxChars),
       materialLinkMaxChars: numberValue(uploads.materialLinkMaxChars, defaultPlatformConfig.uploads.materialLinkMaxChars)
-    }
+    },
+    caseTypes: caseTypeArrayValue(input.caseTypes)
   };
 }
 
@@ -277,6 +299,41 @@ function stringArrayValue(value: unknown, fallback: string[]): string[] {
     .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
     .map((item) => item.trim());
   return items.length ? [...new Set(items)] : fallback;
+}
+
+function caseTypeArrayValue(value: unknown): PlatformCaseType[] {
+  const items = Array.isArray(value)
+    ? value
+      .map((item) => normalizeCaseType(item))
+      .filter((item): item is PlatformCaseType => Boolean(item))
+    : [];
+  const byKey = new Map<string, PlatformCaseType>();
+  byKey.set(defaultCaseType.key, defaultCaseType);
+  for (const item of items) {
+    byKey.set(item.key, item.key === defaultCaseType.key ? { ...item, enabled: true } : item);
+  }
+  return [...byKey.values()].sort((a, b) => a.sort - b.sort || a.key.localeCompare(b.key));
+}
+
+function normalizeCaseType(value: unknown): PlatformCaseType | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const key = typeof value.key === "string" ? value.key.trim() : "";
+  const label = typeof value.label === "string" ? value.label.trim() : "";
+  if (!/^[a-z][a-z0-9_-]{1,31}$/.test(key) || !label) {
+    return undefined;
+  }
+  const description = typeof value.description === "string" && value.description.trim()
+    ? value.description.trim()
+    : undefined;
+  return {
+    key,
+    label,
+    enabled: booleanValue(value.enabled, true),
+    sort: numberValue(value.sort, 0),
+    ...(description ? { description } : {})
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

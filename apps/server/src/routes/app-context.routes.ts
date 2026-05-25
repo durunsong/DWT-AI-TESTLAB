@@ -10,6 +10,7 @@ function registerContextRouteSet(app: FastifyInstance, service: AppContextServic
   const bodyLimit = service.contextBodyLimitBytes();
 
   app.get(prefix, async () => ok(await service.getContext()));
+  app.get(`${prefix}/overview`, async () => ok(await service.getContextOverview()));
 
   app.get<{
     Params: {

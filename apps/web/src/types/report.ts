@@ -47,7 +47,7 @@ export interface RunReport {
   steps: StepResult[];
 }
 
-export type ArtifactKind = "logs" | "screenshots" | "reports" | "traces" | "ai-reports";
+export type ArtifactKind = "logs" | "screenshots" | "reports" | "traces" | "videos" | "ai-reports";
 
 export interface AiAnalysisRecord {
   stepId: string;

@@ -15,6 +15,12 @@ pnpm ci:check
 - `pnpm test`
 - `pnpm dwt validate`
 
+如果 CI runner 没有预装 Playwright 浏览器，执行真实浏览器回归前需要安装：
+
+```bash
+pnpm exec playwright install --with-deps
+```
+
 ## 环境级预检
 
 如果 CI 中配置了测试环境变量，可以追加：
@@ -35,3 +41,5 @@ pnpm dwt run login_user --env=sit --headless --no-env-file
 ```
 
 建议先将 `validate` 和 `preflight` 作为必过门禁，再逐步加入真实浏览器回归。
+
+不要在 CI 中对 `prod/production` 环境执行自动化流程。生产环境相关配置只用于构建或人工核对，不作为回归目标。

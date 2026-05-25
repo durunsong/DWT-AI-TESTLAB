@@ -30,8 +30,10 @@ test("asks failure analysis to use API request parameters and action diagnostics
           recentActionDiagnostics: [{
             kind: "input_value",
             target: "admin_login_username",
-            protected: true,
-            matched: false
+            protected: false,
+            matched: false,
+            expectedValue: "admin@example.com",
+            actualValue: "admin@example.com2124"
           }],
           recentApiResponses: [{
             method: "POST",
@@ -39,7 +41,7 @@ test("asks failure analysis to use API request parameters and action diagnostics
             status: 200,
             statusText: "OK",
             ok: true,
-            requestPostData: "{\"username\":\"******\"}",
+            requestPostData: "{\"username\":\"admin@example.com2124\",\"password\":\"******\"}",
             bodyText: "{\"code\":\"401\"}",
             matchedAt: "2026-05-23T00:00:00.000Z"
           }]
@@ -52,6 +54,8 @@ test("asks failure analysis to use API request parameters and action diagnostics
   assert.match(payload, /接口请求参数/);
   assert.match(payload, /动作诊断/);
   assert.match(payload, /人工干预/);
+  assert.match(payload, /账号类测试入参可明文比对/);
+  assert.match(payload, /admin@example\.com2124/);
 });
 
 test("asks failure analysis to include developer handoff fields", () => {

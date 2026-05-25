@@ -43,20 +43,27 @@ export function buildDeveloperHandoffSummary(input: {
 }
 
 function classifyFailure(step: StepResult): DeveloperFailureCategory {
-  const text = `${step.type} ${step.error ?? ""} ${JSON.stringify(step.data ?? {})}`.toLowerCase();
-  if (/business|接口|响应|http|api|status|code|success=false|failurecode|bodyjson|waitforapi/.test(text)) {
-    return "api_business_failure";
+  const text = searchText(step);
+
+  if (hasMismatchedInputDiagnostic(step.data)) {
+    return "automation_runtime";
   }
-  if (/未找到|定位|locator|selector|visible|可见元素|element|strict mode|timeout/.test(text)) {
-    return "locator_or_ui_change";
-  }
-  if (/env|环境变量|账号|密码|登录|token|数据|缺少|不存在/.test(text)) {
+  if (/用户不存在|账号不存在|账户不存在|user\s*(not\s*found|not\s*exist|not\s*exists)|account\s*(not\s*found|not\s*exist|not\s*exists)/i.test(text)) {
     return "environment_or_data";
   }
-  if (/断言|assert|expected|期望/.test(text)) {
+  if (/env|环境变量|账号|账户|用户名|密码|登录|token|数据|缺少|不存在/i.test(text)) {
+    return "environment_or_data";
+  }
+  if (/business|接口|响应|http|api|status|code|success=false|failurecode|bodyjson|waitforapi/i.test(text)) {
+    return "api_business_failure";
+  }
+  if (/未找到.*定位|locator|selector|visible|可见元素|element|strict mode|timeout/i.test(text)) {
+    return "locator_or_ui_change";
+  }
+  if (/断言|assert|expected|期望/i.test(text)) {
     return "assertion_failure";
   }
-  if (/browser|context|trace|playwright|运行器|runtime/.test(text)) {
+  if (/browser|context|trace|playwright|运行器|runtime/i.test(text)) {
     return "automation_runtime";
   }
   return "unknown";
@@ -78,7 +85,7 @@ function buildTitle(ownerHint: DeveloperOwnerHint, category: DeveloperFailureCat
   const ownerText: Record<DeveloperOwnerHint, string> = {
     frontend: "前端页面或定位疑似变更",
     backend: "后端接口或业务返回异常",
-    test: "自动化用例或断言需要确认",
+    test: "测试执行或自动化输入需要确认",
     environment: "环境、账号或测试数据需要确认",
     unknown: "失败原因需要进一步确认"
   };
@@ -89,12 +96,13 @@ function buildEvidence(step: StepResult): string[] {
   const evidence = [
     `失败步骤：${step.stepId} / ${step.name} / ${step.type}`,
     step.error ? `错误信息：${step.error}` : "",
+    ...summarizeInputMismatches(step.data),
     step.url ? `页面地址：${step.url}` : "",
     step.data !== undefined ? `诊断数据：${compactJson(step.data)}` : "",
     step.screenshot ? `失败截图：${step.screenshot}` : "",
     step.trace ? `Trace：${step.trace}` : ""
   ].filter(Boolean);
-  return evidence.slice(0, 6);
+  return evidence.slice(0, 8);
 }
 
 function suggestedAction(category: DeveloperFailureCategory): string {
@@ -102,17 +110,80 @@ function suggestedAction(category: DeveloperFailureCategory): string {
     api_business_failure: "请后端开发优先检查接口返回码、业务错误信息和入参处理；同时确认前端是否按接口契约提交了必要字段。",
     locator_or_ui_change: "请前端开发确认页面元素、文案、组件结构或可访问属性是否变更；测试同学同步更新 location/YAML 定位。",
     assertion_failure: "请测试同学确认断言是否符合当前业务规则；如规则已变化，更新 YAML 断言和预期数据。",
-    environment_or_data: "请先确认环境变量、账号权限、测试数据和前置状态是否满足用例要求。",
-    automation_runtime: "请测试同学检查浏览器、trace、等待策略和运行器异常，必要时补充重试或等待条件。",
+    environment_or_data: "请先确认环境变量、账号权限、测试数据和前置状态是否满足用例要求；不要直接转给后端处理。",
+    automation_runtime: "请测试同学优先确认是否有人手动修改页面输入、浏览器自动填充是否干扰、自动化输入是否稳定，并结合输入值诊断和接口入参复核。",
     unknown: "请结合失败截图、日志、trace 和 AI 分析进一步确认归因，再转给对应开发处理。"
   };
   return actions[category];
 }
 
+function searchText(step: StepResult): string {
+  return `${step.type} ${step.error ?? ""} ${compactJson(step.data)}`.toLowerCase();
+}
+
 function compactJson(value: unknown): string {
-  const content = JSON.stringify(value);
+  const content = safeStringify(value);
   if (!content) {
     return "-";
   }
   return content.length > 420 ? `${content.slice(0, 420)}...` : content;
+}
+
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? "";
+  } catch {
+    return String(value);
+  }
+}
+
+function hasMismatchedInputDiagnostic(value: unknown): boolean {
+  return findRecords(value).some((item) => item.kind === "input_value" && item.matched === false);
+}
+
+function summarizeInputMismatches(value: unknown): string[] {
+  return findRecords(value)
+    .filter((item) => item.kind === "input_value" && item.matched === false)
+    .slice(0, 3)
+    .map((item) => {
+      const target = typeof item.target === "string" ? item.target : "-";
+      const phase = typeof item.phase === "string" ? item.phase : "-";
+      const expected = "expectedValue" in item ? String(item.expectedValue ?? "") : summaryText(item.expectedSummary);
+      const actual = "actualValue" in item ? String(item.actualValue ?? "") : summaryText(item.actualSummary);
+      return `输入值不一致：${target} / ${phase}，期望 ${expected || "-"}，实际 ${actual || "-"}`;
+    });
+}
+
+function summaryText(value: unknown): string {
+  if (!isRecord(value)) {
+    return "";
+  }
+  const empty = value.empty === true ? "空" : "非空";
+  const length = typeof value.length === "number" ? value.length : "-";
+  return `${empty}，长度 ${length}`;
+}
+
+function findRecords(value: unknown): Array<Record<string, unknown>> {
+  const records: Array<Record<string, unknown>> = [];
+  const visit = (current: unknown): void => {
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        visit(item);
+      }
+      return;
+    }
+    if (!isRecord(current)) {
+      return;
+    }
+    records.push(current);
+    for (const item of Object.values(current)) {
+      visit(item);
+    }
+  };
+  visit(value);
+  return records;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

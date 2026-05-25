@@ -18,6 +18,7 @@ import { EnvConfigService } from "./services/env-config.service";
 import { ReportService } from "./services/report.service";
 import { TestRunService } from "./services/test-run.service";
 import { AiReportService } from "./services/ai-report.service";
+import { PlatformSettingsService } from "./services/platform-settings.service";
 
 export interface CreateServerOptions {
   rootDir: string;
@@ -56,6 +57,7 @@ export async function createServer(options: CreateServerOptions): Promise<Fastif
   const reportService = new ReportService(rootDir, platformConfig);
   const appContextService = new AppContextService(rootDir, platformConfig);
   const dbService = new DbService();
+  const platformSettingsService = new PlatformSettingsService(rootDir);
 
   await registerCaseRoutes(app, caseService, platformConfig);
   await registerTestRunRoutes(app, testRunService, reportService);
@@ -64,7 +66,7 @@ export async function createServer(options: CreateServerOptions): Promise<Fastif
   await registerAiRoutes(app, rootDir, platformConfig, aiReportService);
   await registerAppContextRoutes(app, appContextService);
   await registerDbRoutes(app, dbService);
-  await registerSettingsRoutes(app, envConfigService);
+  await registerSettingsRoutes(app, envConfigService, platformSettingsService);
 
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(error);

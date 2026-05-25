@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildInputValueDiagnostic, isProtectedInputTarget } from "./action-diagnostics";
 
-test("protects login identity values while preserving mismatch evidence", () => {
+test("keeps login account values readable for AI parameter analysis", () => {
   const diagnostic = buildInputValueDiagnostic({
     phase: "before_click",
     stepId: "click_login",
@@ -15,11 +15,30 @@ test("protects login identity values while preserving mismatch evidence", () => 
 
   assert.equal(diagnostic.kind, "input_value");
   assert.equal(diagnostic.matched, false);
+  assert.equal(diagnostic.protected, false);
+  assert.equal(diagnostic.expectedValue, "admin@example.com");
+  assert.equal(diagnostic.actualValue, "other@example.com");
+  assert.equal(diagnostic.expectedSummary, undefined);
+  assert.equal(diagnostic.actualSummary, undefined);
+});
+
+test("protects password and token values while preserving mismatch evidence", () => {
+  const diagnostic = buildInputValueDiagnostic({
+    phase: "after_input",
+    stepId: "input_password",
+    stepName: "输入密码",
+    stepType: "web_input",
+    target: "user_login_password",
+    expectedValue: "secret1",
+    actualValue: "secret12"
+  });
+
+  assert.equal(isProtectedInputTarget("user_login_password"), true);
   assert.equal(diagnostic.protected, true);
   assert.equal(diagnostic.expectedValue, undefined);
   assert.equal(diagnostic.actualValue, undefined);
-  assert.deepEqual(diagnostic.expectedSummary, { empty: false, length: 17 });
-  assert.deepEqual(diagnostic.actualSummary, { empty: false, length: 17 });
+  assert.deepEqual(diagnostic.expectedSummary, { empty: false, length: 7 });
+  assert.deepEqual(diagnostic.actualSummary, { empty: false, length: 8 });
 });
 
 test("keeps non-sensitive form values readable for failure diagnosis", () => {

@@ -10,7 +10,7 @@
 - 多 session 场景编排，适配 user/admin 或其他自定义业务端。
 - DB 只读查询与断言，支持把查询结果写入变量。
 
-## 本次补齐的 Shortest 风格能力
+## 当前 Shortest 风格能力
 
 - API 测试步骤真正可执行：`api_request` / `api_assert` 不再是占位能力。
 - API 步骤支持 `url`、`method`、`headers`、`query`、`body`、`expected_status`、`business_code_path`、`success_codes`、`failure_codes`、`expected`、`body_path`、`save_as`。
@@ -21,9 +21,9 @@
 - 新增 CLI 入口：
   - `pnpm dwt list`
   - `pnpm dwt validate [caseId|file]`
-  - `pnpm dwt preflight <caseId|file> [--env=local|dev|test|sit]`
-  - `pnpm dwt plan <caseId|file> [--env=local|dev|test|sit]`
-  - `pnpm dwt run <caseId> [--env=local|dev|test|sit] [--headless|--headed] [--no-env-file]`
+  - `pnpm dwt preflight <caseId|file> [--env=local|dev|sit] [--no-env-file]`
+  - `pnpm dwt plan <caseId|file> [--env=local|dev|sit] [--no-env-file]`
+  - `pnpm dwt run <caseId|file> [--env=local|dev|sit] [--headless|--headed] [--no-env-file]`
 - 新增运行前预检能力：在真正启动浏览器或请求接口前检查 DSL、环境变量、定位文件、定位 key、API baseUrl、DB 开关和上传文件。
 - 用例编辑页已接入预检按钮，执行前也会自动预检；预检失败时不会启动运行。
 - 新增服务端预检接口：

@@ -9,7 +9,7 @@ pnpm dwt preflight login_user --env=local
 pnpm dwt plan cases/scenario/login.user.yaml --env=sit
 ```
 
-预检会默认读取 `.env` 和对应环境文件；如需只使用当前进程环境变量：
+CLI 预检会默认读取 `.env` 和对应环境文件：`local` 读取 `.env` + `.env.local`，其他环境读取 `.env` + `.env.<env>`。如需只使用当前进程环境变量：
 
 ```bash
 pnpm dwt preflight login_user --env=sit --no-env-file
@@ -43,6 +43,7 @@ POST /api/cases/preflight
 - `api_assert` 是否配置了足够强的断言。
 - DB 步骤是否在 `DB_ENABLED=true` 下运行。
 - 上传文件是否存在；变量化文件路径只提示 warning。
+- `prod/production` 环境和疑似生产域名会被拦截。
 
 ## 页面入口
 

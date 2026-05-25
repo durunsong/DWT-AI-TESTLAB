@@ -13,6 +13,7 @@ export interface ScenarioSession {
 export interface ScenarioCase {
   case_id: string;
   case_name: string;
+  case_type: string;
   description?: string;
   mode: ScenarioMode;
   defaults?: {

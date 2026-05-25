@@ -104,6 +104,7 @@ export function normalizeScenarioShape(raw: unknown): unknown {
   const scenario: Record<string, unknown> = { ...raw };
   scenario.case_id = stringValue(scenario.case_id) || stringValue(scenario.caseId);
   scenario.case_name = stringValue(scenario.case_name) || stringValue(scenario.caseName);
+  scenario.case_type = stringValue(scenario.case_type) || stringValue(scenario.caseType) || undefined;
 
   const steps = flattenScenarioItems(scenario, (item, phase, index) => normalizeStepShape(item, phase, index));
   if (steps.length) {

@@ -150,6 +150,7 @@ function state(variables: Record<string, string> = {}): RuntimeContextState {
     scenario: {
       case_id: "api_case",
       case_name: "API case",
+      case_type: "uncategorized",
       mode: "hybrid",
       sessions: [],
       locations: { file: "cases/location/login.user.yaml" },

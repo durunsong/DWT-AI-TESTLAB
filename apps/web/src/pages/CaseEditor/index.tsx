@@ -5,6 +5,7 @@ import { ArrowLeftOutlined, CheckCircleOutlined, CopyOutlined, DeleteOutlined, D
 import { useNavigate, useParams } from "react-router-dom";
 import { assistCaseYaml, type AiMaterialFileInput, type CaseYamlAssistMode } from "../../api/ai";
 import { caseAttachmentFileUrl, deleteCaseAttachment, getCase, listCaseAttachments, normalizeCaseYaml, preflightCaseContent, saveCase, searchCaseAttachments, uploadCaseAttachment, validateCase } from "../../api/cases";
+import { listCaseTypes } from "../../api/settings";
 import { createTestRun } from "../../api/testRuns";
 import { AiThinking } from "../../components/AiThinking";
 import { IMAGE_PREVIEW_MAX_HEIGHT_CLASS, IMAGE_PREVIEW_MODAL_WIDTH } from "../../components/image-preview";
@@ -13,6 +14,7 @@ import { YamlEditor } from "../../components/YamlEditor";
 import { useCaseStore } from "../../stores/useCaseStore";
 import { useSettingStore } from "../../stores/useSettingStore";
 import type { CaseAttachmentResult, CaseAttachmentSearchResult, CasePreflightResult, CaseValidationResult } from "../../types/case";
+import type { CaseTypeConfig } from "../../types/settings";
 import { cn } from "../../utils/cn";
 import { playTypewriterText } from "../../utils/typewriter-text";
 import { appendInstructionBlock, buildAttachmentAiPrompt, buildAttachmentBatchAiPrompt, collectUploadSteps, filterNewAttachmentSearchResults, insertUploadStepBeforeSubmit, isImageAttachmentFile, upsertUploadStepFile, type AttachmentPromptFile, type UploadStepOption } from "./attachment-prompt";
@@ -41,6 +43,7 @@ const aiModeTips: Record<CaseYamlAssistMode, string> = {
 interface CaseMetaFormValues {
   caseId: string;
   caseName: string;
+  caseType: string;
   description?: string;
 }
 
@@ -90,6 +93,7 @@ export default function CaseEditor() {
   const [aiInstructionAttachments, setAiInstructionAttachments] = useState<AiInstructionAttachmentItem[]>([]);
   const [previewAttachment, setPreviewAttachment] = useState<ImagePreviewItem>();
   const [pageDropTarget, setPageDropTarget] = useState<CaseEditorDropTarget>();
+  const [caseTypes, setCaseTypes] = useState<CaseTypeConfig[]>([{ key: "uncategorized", label: "未分类", enabled: true, sort: 0 }]);
   const dragDepthRef = useRef(0);
   const uploadSteps = collectUploadSteps(yaml);
   const selectedPromptFileList = Object.values(selectedPromptFiles);
@@ -113,6 +117,12 @@ export default function CaseEditor() {
       .catch((error) => messageApi.error(error instanceof Error ? error.message : String(error)))
       .finally(() => setLoading(false));
   }, [caseId, messageApi, setActiveCase, setValidation]);
+
+  useEffect(() => {
+    listCaseTypes()
+      .then((items) => setCaseTypes(items.filter((item) => item.enabled)))
+      .catch(() => setCaseTypes([{ key: "uncategorized", label: "未分类", enabled: true, sort: 0 }]));
+  }, []);
 
   useEffect(() => {
     const target = resolveCaseEditorDropTarget({ aiOpen, attachmentUploading, aiInstructionUploading });
@@ -251,6 +261,7 @@ export default function CaseEditor() {
     setYaml(updateYamlMeta(yaml, {
       caseId: normalizeCaseId(values.caseId),
       caseName: values.caseName,
+      caseType: values.caseType,
       description: values.description
     }));
   }
@@ -648,12 +659,13 @@ export default function CaseEditor() {
               initialValues={{
                 caseId: activeCase?.caseId,
                 caseName: activeCase?.caseName,
+                caseType: activeCase?.caseType ?? "uncategorized",
                 description: activeCase?.description ?? ""
               }}
               onValuesChange={handleMetaChange}
             >
               <Row gutter={12}>
-                <Col span={8}>
+                <Col span={6}>
                   <Form.Item
                     label="caseId"
                     name="caseId"
@@ -669,12 +681,21 @@ export default function CaseEditor() {
                     <Input size="small" placeholder="例如 admin_profile_update" />
                   </Form.Item>
                 </Col>
-                <Col span={8}>
+                <Col span={6}>
                   <Form.Item label="名称" name="caseName" rules={[{ required: true, message: "请输入名称" }]}>
                     <Input size="small" placeholder="例如 admin 修改资料" />
                   </Form.Item>
                 </Col>
-                <Col span={8}>
+                <Col span={5}>
+                  <Form.Item label="用例类型" name="caseType" rules={[{ required: true, message: "请选择用例类型" }]}>
+                    <Select
+                      size="small"
+                      options={caseTypes.map((item) => ({ label: item.label, value: item.key }))}
+                      placeholder="选择类型"
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={7}>
                   <Form.Item label="说明" name="description">
                     <Input size="small" placeholder="简要说明用例覆盖的流程或断言目标" />
                   </Form.Item>
@@ -1143,14 +1164,15 @@ function normalizeAiYaml(content: string): string {
     .concat("\n");
 }
 
-function updateYamlMeta(content: string, meta: { caseId: string; caseName: string; description?: string }): string {
+function updateYamlMeta(content: string, meta: { caseId: string; caseName: string; caseType: string; description?: string }): string {
   const lines = content.replace(/\r\n/g, "\n").split("\n");
   const nextLines = upsertYamlScalar(lines, "case_id", meta.caseId);
   const withName = upsertYamlScalar(nextLines, "case_name", meta.caseName);
-  return upsertYamlScalar(withName, "description", meta.description?.trim() ?? "").join("\n");
+  const withType = upsertYamlScalar(withName, "case_type", meta.caseType || "uncategorized");
+  return upsertYamlScalar(withType, "description", meta.description?.trim() ?? "").join("\n");
 }
 
-function upsertYamlScalar(lines: string[], key: "case_id" | "case_name" | "description", value: string): string[] {
+function upsertYamlScalar(lines: string[], key: "case_id" | "case_name" | "case_type" | "description", value: string): string[] {
   const next = [...lines];
   const lineIndex = next.findIndex((line) => line.startsWith(`${key}:`));
   if (!value && key === "description") {
@@ -1166,7 +1188,13 @@ function upsertYamlScalar(lines: string[], key: "case_id" | "case_name" | "descr
     return next;
   }
 
-  const insertIndex = key === "case_id" ? 0 : key === "case_name" ? afterKey(next, "case_id") : afterKey(next, "case_name");
+  const insertIndex = key === "case_id"
+    ? 0
+    : key === "case_name"
+      ? afterKey(next, "case_id")
+      : key === "case_type"
+        ? afterKey(next, "case_name")
+        : afterKey(next, "case_type");
   next.splice(insertIndex, 0, line);
   return next;
 }

@@ -40,7 +40,8 @@ export class ReportBuilder {
         htmlReport: input.artifacts.htmlReport,
         log: input.artifacts.logFile,
         screenshotsDir: input.artifacts.screenshotsDir,
-        tracesDir: input.artifacts.tracesDir
+        tracesDir: input.artifacts.tracesDir,
+        videosDir: input.artifacts.videosDir
       },
       failureSummary: failedStep?.error,
       developerSummary: buildDeveloperHandoffSummary({

@@ -1,5 +1,13 @@
 import { request } from "./request";
-import type { EnvFileConfig, EnvFileContent, EnvVariable, TestEnv } from "../types/settings";
+import type { CaseTypeConfig, EnvFileConfig, EnvFileContent, EnvVariable, TestEnv } from "../types/settings";
+
+export function listCaseTypes(): Promise<CaseTypeConfig[]> {
+  return request.get<unknown, CaseTypeConfig[]>("/settings/case-types");
+}
+
+export function saveCaseTypes(caseTypes: CaseTypeConfig[]): Promise<CaseTypeConfig[]> {
+  return request.put<unknown, CaseTypeConfig[]>("/settings/case-types", { caseTypes });
+}
 
 export function listEnvFiles(): Promise<EnvFileConfig[]> {
   return request.get<unknown, EnvFileConfig[]>("/settings/env-files");

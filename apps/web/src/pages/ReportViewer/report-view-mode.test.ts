@@ -6,6 +6,10 @@ test("accepts traces as a report view mode", () => {
   assert.equal(readReportViewMode("traces"), "traces");
 });
 
+test("accepts videos as a report view mode", () => {
+  assert.equal(readReportViewMode("videos"), "videos");
+});
+
 test("accepts AI analysis as a report view mode", () => {
   assert.equal(readReportViewMode("ai-analysis"), "ai-analysis");
 });

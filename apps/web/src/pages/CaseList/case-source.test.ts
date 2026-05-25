@@ -4,11 +4,11 @@ import { buildCaseSourceOptions, createCaseYamlFromSource } from "./case-source"
 import type { CaseItem } from "../../types/case";
 
 const cases: CaseItem[] = [
-  { caseId: "kyc_submit", caseName: "KYC submit", mode: "web", total: 4, valid: true },
-  { caseId: "login_user", caseName: "User login", mode: "web", total: 3, valid: true },
-  { caseId: "broken_case", caseName: "Broken", mode: "invalid", total: 0, valid: false },
-  { caseId: "login_admin", caseName: "Admin login", mode: "web", total: 3, valid: true },
-  { caseId: "account_update", caseName: "Account update", mode: "web", total: 5, valid: true }
+  { caseId: "kyc_submit", caseName: "KYC submit", caseType: "uncategorized", mode: "web", total: 4, valid: true },
+  { caseId: "login_user", caseName: "User login", caseType: "uncategorized", mode: "web", total: 3, valid: true },
+  { caseId: "broken_case", caseName: "Broken", caseType: "uncategorized", mode: "invalid", total: 0, valid: false },
+  { caseId: "login_admin", caseName: "Admin login", caseType: "uncategorized", mode: "web", total: 3, valid: true },
+  { caseId: "account_update", caseName: "Account update", caseType: "uncategorized", mode: "web", total: 5, valid: true }
 ];
 
 test("builds searchable source options with preferred cases first", () => {
@@ -18,6 +18,14 @@ test("builds searchable source options with preferred cases first", () => {
     "kyc_submit",
     "account_update"
   ]);
+});
+
+test("keeps case type on case source options", () => {
+  const [option] = buildCaseSourceOptions([
+    { caseId: "smoke_case", caseName: "Smoke case", caseType: "smoke", mode: "web", total: 1, valid: true }
+  ]);
+
+  assert.equal(option?.caseType, "smoke");
 });
 
 test("creates a new case yaml from source content and replaces metadata", () => {
@@ -39,7 +47,7 @@ test("creates a new case yaml from source content and replaces metadata", () => 
     }
   );
 
-  assert.match(yaml, /^case_id: login_user_sit\ncase_name: "User login SIT"\ndescription: "SIT login flow"\nmode: web/m);
+  assert.match(yaml, /^case_id: login_user_sit\ncase_name: "User login SIT"\ncase_type: uncategorized\ndescription: "SIT login flow"\nmode: web/m);
   assert.match(yaml, /step_id: open_login/);
 });
 
@@ -52,5 +60,5 @@ test("inserts missing description after case_name when cloning source yaml", () 
     }
   );
 
-  assert.match(yaml, /^case_id: login_admin_copy\ncase_name: "Admin login copy"\nmode: web/m);
+  assert.match(yaml, /^case_id: login_admin_copy\ncase_name: "Admin login copy"\ncase_type: uncategorized\nmode: web/m);
 });

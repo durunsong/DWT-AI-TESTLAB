@@ -49,6 +49,59 @@ test("builds backend handoff summary from API business failure", () => {
   assert.equal(summary?.relatedArtifacts.screenshot, failedStep.screenshot);
 });
 
+test("classifies login input mismatches as test automation before backend API failure", () => {
+  const failedStep: StepResult = {
+    stepId: "user_login",
+    name: "user 登录",
+    type: "flow_login",
+    status: "failed",
+    error: "user 登录提交后仍停留在登录页",
+    data: {
+      diagnostics: {
+        recentApiResponses: [{
+          url: "http://127.0.0.1:8082/gateway/user/api/v1/auth/login",
+          method: "POST",
+          status: 200,
+          statusText: "",
+          ok: true,
+          failed: true,
+          failureReason: "用户不存在",
+          requestPostData: "loginName=1925344663%40qq.com2124&loginPwd=******",
+          bodyJson: {
+            code: "1001",
+            msg: "用户不存在",
+            success: false
+          },
+          matchedAt: "2026-05-25T07:14:05.007Z"
+        }],
+        recentActionDiagnostics: [{
+          kind: "input_value",
+          phase: "before_click",
+          target: "user_login_username",
+          protected: false,
+          matched: false,
+          expectedValue: "1925344663@qq.com",
+          actualValue: "1925344663@qq.com2124",
+          checkedAt: "2026-05-25T07:14:00.978Z"
+        }]
+      }
+    }
+  };
+
+  const summary = buildDeveloperHandoffSummary({
+    runId: "0002_login_user_mpkve9pr43b7",
+    caseId: "login_user",
+    env: "local",
+    failedStep,
+    artifacts: {}
+  });
+
+  assert.equal(summary?.ownerHint, "test");
+  assert.equal(summary?.category, "automation_runtime");
+  assert.match(summary?.title ?? "", /测试执行/);
+  assert.match(summary?.suggestedAction ?? "", /人工干预|输入值/);
+});
+
 test("builds locator handoff summary from missing element failure", () => {
   const failedStep: StepResult = {
     stepId: "input_username",

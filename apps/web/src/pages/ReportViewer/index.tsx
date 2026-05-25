@@ -1,6 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, Col, Empty, Modal, Row, Segmented, Space, Statistic, Table, Tag, Typography, message } from "antd";
-import { CopyOutlined, FileTextOutlined, FolderOpenOutlined, RobotOutlined } from "@ant-design/icons";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Button, Card, Col, Empty, Modal, Row, Segmented, Slider, Space, Statistic, Table, Tag, Typography, message } from "antd";
+import {
+  CopyOutlined,
+  FileTextOutlined,
+  FolderOpenOutlined,
+  MutedOutlined,
+  PauseCircleOutlined,
+  PlayCircleOutlined,
+  RobotOutlined,
+  SoundOutlined
+} from "@ant-design/icons";
+import ReactPlayer from "react-player/HtmlPlayer";
 import { useParams, useSearchParams } from "react-router-dom";
 import { getTestRun, getTestRunLogs } from "../../api/testRuns";
 import { getAiRunReport, getTestRunReport, listRunArtifactFiles } from "../../api/reports";
@@ -16,6 +26,7 @@ import type { StepResult } from "../../types/run";
 import { toArtifactUrl, toScreenshotUrl } from "../../utils/artifact-url";
 import { formatDuration, formatTime } from "../../utils/format";
 import { readReportViewMode, type ReportViewMode } from "./report-view-mode";
+import { clampVideoTime, formatVideoTime, resolveVideoSliderValue } from "./video-player";
 
 interface DetailPreview {
   title: string;
@@ -34,8 +45,17 @@ export default function ReportViewer() {
   const [mode, setMode] = useState<ReportViewMode>(() => readReportViewMode(searchParams.get("mode")));
   const [logs, setLogs] = useState("");
   const [traceFiles, setTraceFiles] = useState<ArtifactFile[]>([]);
+  const [videoFiles, setVideoFiles] = useState<ArtifactFile[]>([]);
   const [screenshotPreview, setScreenshotPreview] = useState<{ title: string; src: string }>();
+  const [videoPreview, setVideoPreview] = useState<{ title: string; src: string }>();
   const [detailPreview, setDetailPreview] = useState<DetailPreview>();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [videoPlaying, setVideoPlaying] = useState(false);
+  const [videoCurrentTime, setVideoCurrentTime] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [videoSeeking, setVideoSeeking] = useState(false);
+  const [videoSeekTime, setVideoSeekTime] = useState(0);
+  const [videoMuted, setVideoMuted] = useState(false);
   const [latestMissing, setLatestMissing] = useState(false);
   const fullJson = useMemo(() => (report ? JSON.stringify(report, null, 2) : ""), [report]);
   const displayJson = useMemo(() => truncateMiddle(fullJson, 140_000), [fullJson]);
@@ -45,6 +65,32 @@ export default function ReportViewer() {
   }, [searchParams]);
 
   useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !videoPreview) return;
+
+    const playWhenReady = () => {
+      void video
+        .play()
+        .then(() => setVideoPlaying(true))
+        .catch(() => setVideoPlaying(false));
+    };
+
+    setVideoPlaying(false);
+    setVideoCurrentTime(0);
+    setVideoSeeking(false);
+    setVideoSeekTime(0);
+    setVideoDuration(0);
+    video.load();
+    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      playWhenReady();
+      return;
+    }
+
+    video.addEventListener("loadeddata", playWhenReady, { once: true });
+    return () => video.removeEventListener("loadeddata", playWhenReady);
+  }, [videoPreview]);
+
+  useEffect(() => {
     if (!runId) return;
     let canceled = false;
     setLatestMissing(false);
@@ -52,6 +98,7 @@ export default function ReportViewer() {
     setAiReport(null);
     setLogs("");
     setTraceFiles([]);
+    setVideoFiles([]);
 
     async function loadReport() {
       try {
@@ -61,12 +108,13 @@ export default function ReportViewer() {
           reset();
           setReport(undefined);
           setLogs("");
+          setVideoFiles([]);
           setLatestMissing(params.runId === "latest");
           return;
         }
 
         setSummary(summary);
-        const [nextReport, nextAiReport, nextLogs, nextTraceFiles] = await Promise.all([
+        const [nextReport, nextAiReport, nextLogs, nextTraceFiles, nextVideoFiles] = await Promise.all([
           getTestRunReport(summary.runId).catch((error) => {
             const errorMessage = error instanceof Error ? error.message : String(error);
             messageApi.warning(errorMessage);
@@ -74,13 +122,15 @@ export default function ReportViewer() {
           }),
           getAiRunReport(summary.runId).catch(() => null),
           getTestRunLogs(summary.runId).catch(() => ""),
-          listRunArtifactFiles("traces", summary.runId).catch(() => [])
+          listRunArtifactFiles("traces", summary.runId).catch(() => []),
+          listRunArtifactFiles("videos", summary.runId).catch(() => [])
         ]);
         if (canceled) return;
         setReport(nextReport ?? undefined);
         setAiReport(nextAiReport);
         setLogs(nextLogs);
         setTraceFiles(nextTraceFiles);
+        setVideoFiles(nextVideoFiles);
       } catch (error) {
         if (canceled) return;
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -133,8 +183,59 @@ export default function ReportViewer() {
     setDetailPreview({ title, content, danger });
   }
 
+  function closeVideoPreview() {
+    videoRef.current?.pause();
+    setVideoPreview(undefined);
+    setVideoPlaying(false);
+  }
+
+  function toggleVideoPlayback() {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      void video
+        .play()
+        .then(() => setVideoPlaying(true))
+        .catch(() => setVideoPlaying(false));
+      return;
+    }
+    video.pause();
+    setVideoPlaying(false);
+  }
+
+  function handleVideoLoadedMetadata() {
+    const video = videoRef.current;
+    if (!video) return;
+    setVideoDuration(Number.isFinite(video.duration) ? video.duration : 0);
+    setVideoMuted(video.muted);
+  }
+
+  function handleVideoSeekChange(value: number | number[]) {
+    const nextTime = clampVideoTime(sliderValueToNumber(value), videoDuration);
+    setVideoSeeking(true);
+    setVideoSeekTime(nextTime);
+  }
+
+  function handleVideoSeekComplete(value: number | number[]) {
+    const video = videoRef.current;
+    const nextTime = clampVideoTime(sliderValueToNumber(value), videoDuration);
+    if (video) {
+      video.currentTime = nextTime;
+    }
+    setVideoCurrentTime(nextTime);
+    setVideoSeekTime(nextTime);
+    setVideoSeeking(false);
+  }
+
+  function toggleVideoMuted() {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = !video.muted;
+    setVideoMuted(video.muted);
+  }
+
   return (
-    <div className="flex min-h-full flex-col gap-2.5">
+    <div className="report-viewer flex min-h-full min-w-0 flex-col gap-2.5">
       {contextHolder}
       <PageHeader
         title="报告查看"
@@ -149,7 +250,8 @@ export default function ReportViewer() {
               { label: "截图", value: "screenshots" },
               { label: "AI 分析", value: "ai-analysis" },
               { label: "日志", value: "logs" },
-              { label: "Trace", value: "traces" }
+              { label: "Trace", value: "traces" },
+              { label: "视频", value: "videos" }
             ]}
             onChange={changeMode}
           />
@@ -177,6 +279,9 @@ export default function ReportViewer() {
           </Button>
           <Button icon={<FolderOpenOutlined />} type={mode === "traces" ? "primary" : "default"} disabled={!traceSteps.length && !traceFiles.length} onClick={() => changeMode("traces")}>
             Trace
+          </Button>
+          <Button icon={<FolderOpenOutlined />} type={mode === "videos" ? "primary" : "default"} disabled={!videoFiles.length} onClick={() => changeMode("videos")}>
+            视频
           </Button>
         </Space>
       </Card>
@@ -209,7 +314,7 @@ export default function ReportViewer() {
                   </Col>
                 </Row>
               </div>
-              <div className="grid gap-[10px]">
+              <div className="grid min-w-0 gap-[10px]">
                 {developerSummary ? (
                   <DeveloperSummaryCard
                     summary={developerSummary}
@@ -219,9 +324,14 @@ export default function ReportViewer() {
                   />
                 ) : null}
                 {failureSummary ? (
-                  <Alert type="error" showIcon title="失败摘要" description={failureSummary} />
+                  <Alert
+                    type="error"
+                    showIcon
+                    title="失败摘要"
+                    description={<span className="report-viewer__long-text block">{failureSummary}</span>}
+                  />
                 ) : null}
-                <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                <div className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white">
                   <Table<StepResult>
                     rowKey="stepId"
                     dataSource={steps}
@@ -422,6 +532,31 @@ export default function ReportViewer() {
             ]}
           />
         ) : null}
+        {mode === "videos" ? (
+          videoFiles.length ? (
+            <Table<ArtifactFile>
+              rowKey="path"
+              dataSource={videoFiles}
+              pagination={false}
+              scroll={{ x: 760 }}
+              columns={[
+                { title: "文件名", dataIndex: "name" },
+                { title: "大小", dataIndex: "sizeBytes", width: 120, render: formatBytes },
+                {
+                  title: "视频",
+                  dataIndex: "path",
+                  render: (href, record) => (
+                    <Button type="link" size="small" onClick={() => setVideoPreview({ title: record.name, src: toArtifactUrl(href) ?? href })}>
+                      打开
+                    </Button>
+                  )
+                }
+              ]}
+            />
+          ) : (
+            <Empty description="暂无视频文件" />
+          )
+        ) : null}
         {mode === "logs" ? <LogTerminal logs={logs} heightClassName="h-[560px]" /> : null}
       </Card>
       <Modal
@@ -435,6 +570,73 @@ export default function ReportViewer() {
         {screenshotPreview ? (
           <div className={`${SCREENSHOT_PREVIEW_MAX_HEIGHT_CLASS} overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3`}>
             <img src={screenshotPreview.src} alt={screenshotPreview.title} className="mx-auto max-w-full rounded bg-white shadow-sm" />
+          </div>
+        ) : null}
+      </Modal>
+      <Modal
+        title={videoPreview ? `运行视频：${videoPreview.title}` : "运行视频"}
+        open={Boolean(videoPreview)}
+        width="86vw"
+        footer={null}
+        destroyOnHidden
+        onCancel={closeVideoPreview}
+      >
+        {videoPreview ? (
+          <div className="overflow-hidden rounded-lg bg-black">
+            <div className="flex max-h-[70vh] items-center justify-center bg-black">
+              <ReactPlayer
+                ref={videoRef}
+                src={videoPreview.src}
+                muted={videoMuted}
+                controls={false}
+                autoPlay
+                playsInline
+                width="100%"
+                height="100%"
+                preload="metadata"
+                className="max-h-[70vh] max-w-full bg-black object-contain [&_video]:max-h-[70vh] [&_video]:w-full [&_video]:object-contain"
+                onLoadedMetadata={handleVideoLoadedMetadata}
+                onTimeUpdate={(event) => {
+                  if (!videoSeeking) {
+                    setVideoCurrentTime(event.currentTarget.currentTime);
+                  }
+                }}
+                onPlaying={() => setVideoPlaying(true)}
+                onPause={() => setVideoPlaying(false)}
+                onEnded={() => setVideoPlaying(false)}
+                onVolumeChange={(event) => setVideoMuted(event.currentTarget.muted)}
+              />
+            </div>
+            <div className="flex items-center gap-3 border-t border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200">
+              <Button
+                size="small"
+                type="text"
+                icon={videoPlaying ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+                className="!text-slate-100 hover:!bg-slate-800 hover:!text-white"
+                onClick={toggleVideoPlayback}
+              />
+              <span className="w-[88px] shrink-0 font-mono tabular-nums text-slate-300">
+                {formatVideoTime(videoCurrentTime)} / {formatVideoTime(videoDuration)}
+              </span>
+              <Slider
+                aria-label="视频进度"
+                min={0}
+                max={Math.max(videoDuration, 0)}
+                step={0.1}
+                value={resolveVideoSliderValue({ currentTime: videoCurrentTime, seekTime: videoSeekTime, seeking: videoSeeking, duration: videoDuration })}
+                tooltip={{ formatter: (value) => formatVideoTime(value ?? 0) }}
+                className="!m-0 min-w-0 flex-1"
+                onChange={handleVideoSeekChange}
+                onChangeComplete={handleVideoSeekComplete}
+              />
+              <Button
+                size="small"
+                type="text"
+                icon={videoMuted ? <MutedOutlined /> : <SoundOutlined />}
+                className="!text-slate-100 hover:!bg-slate-800 hover:!text-white"
+                onClick={toggleVideoMuted}
+              />
+            </div>
           </div>
         ) : null}
       </Modal>
@@ -571,7 +773,7 @@ function DeveloperSummaryCard({
     ...summary.reproduce.map((item) => `- ${item}`)
   ].join("\n");
   return (
-    <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+    <div className="report-viewer__developer-summary rounded-lg border border-blue-200 bg-blue-50 p-4">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -579,7 +781,7 @@ function DeveloperSummaryCard({
             <Tag color={ownerHintColor(summary.ownerHint)}>{ownerHintText(summary.ownerHint)}</Tag>
             <Tag>{categoryText(summary.category)}</Tag>
           </div>
-          <Typography.Text className="!mt-1 !block !text-slate-700">{summary.title}</Typography.Text>
+          <Typography.Text className="report-viewer__long-text !mt-1 !block !text-slate-700">{summary.title}</Typography.Text>
         </div>
         <Space>
           {summary.relatedArtifacts.screenshot ? (
@@ -593,21 +795,21 @@ function DeveloperSummaryCard({
         </Space>
       </div>
       <Row gutter={[10, 10]}>
-        <Col xs={24} xl={12}>
+        <Col xs={24} xl={12} className="min-w-0">
           <div className="h-full rounded-md border border-blue-100 bg-white p-3">
             <Typography.Text strong>关键证据</Typography.Text>
             <ul className="mb-0 mt-2 space-y-1 pl-5 text-sm text-slate-700">
-              {summary.evidence.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
+              {summary.evidence.map((item, index) => <li className="report-viewer__long-text" key={`${item}-${index}`}>{item}</li>)}
             </ul>
           </div>
         </Col>
-        <Col xs={24} xl={12}>
+        <Col xs={24} xl={12} className="min-w-0">
           <div className="h-full rounded-md border border-blue-100 bg-white p-3">
             <Typography.Text strong>复现与建议</Typography.Text>
             <ul className="mb-2 mt-2 space-y-1 pl-5 text-sm text-slate-700">
-              {summary.reproduce.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
+              {summary.reproduce.map((item, index) => <li className="report-viewer__long-text" key={`${item}-${index}`}>{item}</li>)}
             </ul>
-            <Typography.Paragraph className="!mb-0 !text-sm !text-slate-700">{summary.suggestedAction}</Typography.Paragraph>
+            <Typography.Paragraph className="report-viewer__long-text !mb-0 !text-sm !text-slate-700">{summary.suggestedAction}</Typography.Paragraph>
           </div>
         </Col>
       </Row>
@@ -691,6 +893,10 @@ function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function sliderValueToNumber(value: number | number[]): number {
+  return Array.isArray(value) ? value[0] ?? 0 : value;
 }
 
 function statusBadgeClass(status: string): string {

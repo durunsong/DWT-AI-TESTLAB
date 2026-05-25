@@ -1,5 +1,6 @@
 case_id: "admin_zilkiaoxiugai001"
 case_name: "admin 修改资料001"
+case_type: "admin-mian"
 description: "http://localhost:5173/admin/#/admin/sys/perinfo 页面编辑个人信息--个人资料"
 mode: web
 defaults:

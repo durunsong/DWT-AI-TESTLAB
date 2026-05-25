@@ -12,13 +12,17 @@ interface RunState {
   skipped: number;
   logs: string[];
   run?: TestRunSummary;
+  currentBatchId: string;
   setRun: (data: Partial<RunState>) => void;
   setSummary: (run: TestRunSummary) => void;
+  setCurrentBatchId: (batchId: string) => void;
   updateStep: (step: StepResult) => void;
   appendLog: (log: string) => void;
   setLogs: (logs: string | string[]) => void;
   reset: () => void;
 }
+
+const runStorageKey = "dwt-testing-run-state";
 
 const initial = {
   runId: "",
@@ -30,7 +34,8 @@ const initial = {
   failed: 0,
   skipped: 0,
   logs: [] as string[],
-  run: undefined
+  run: undefined,
+  currentBatchId: loadSavedCurrentBatchId()
 };
 
 export const useRunStore = create<RunState>((set) => ({
@@ -48,6 +53,10 @@ export const useRunStore = create<RunState>((set) => ({
       failed: run.failed,
       skipped: run.skipped
     }),
+  setCurrentBatchId: (batchId) => {
+    saveCurrentBatchId(batchId);
+    set({ currentBatchId: batchId });
+  },
   updateStep: (step) =>
     set((state) => {
       const current = state.run;
@@ -69,5 +78,34 @@ export const useRunStore = create<RunState>((set) => ({
     }),
   appendLog: (log) => set((state) => ({ logs: [...state.logs, log] })),
   setLogs: (logs) => set({ logs: Array.isArray(logs) ? logs : logs.split(/\r?\n/) }),
-  reset: () => set(initial)
+  reset: () => set((state) => ({ ...initial, currentBatchId: state.currentBatchId }))
 }));
+
+function loadSavedCurrentBatchId(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  try {
+    const raw = window.localStorage.getItem(runStorageKey);
+    if (!raw) return "";
+    const parsed = JSON.parse(raw) as { currentBatchId?: unknown };
+    return typeof parsed.currentBatchId === "string" ? parsed.currentBatchId : "";
+  } catch {
+    return "";
+  }
+}
+
+function saveCurrentBatchId(batchId: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    if (!batchId) {
+      window.localStorage.removeItem(runStorageKey);
+      return;
+    }
+    window.localStorage.setItem(runStorageKey, JSON.stringify({ currentBatchId: batchId }));
+  } catch {
+    // localStorage can be unavailable in private or restricted contexts.
+  }
+}

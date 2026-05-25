@@ -1,16 +1,21 @@
-import { ClearOutlined, DeleteOutlined, EditOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, UploadOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Popconfirm, Space, Switch, Table, Tag, Upload, message } from "antd";
+import { ClearOutlined, DeleteOutlined, EditOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SaveOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Popconfirm, Select, Space, Switch, Table, Tag, Upload, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { RcFile } from "antd/es/upload";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { getEnvFile, getEnvFileContent, importEnvFile, saveEnvFile, saveEnvFileContent } from "../../api/settings";
-import { deleteAppContextSource, getAppContext, getAppContextSource, saveAppContextSource } from "../../api/context";
+import { deleteAppContextSource, getAppContextOverview, getAppContextSource, saveAppContextSource } from "../../api/context";
 import { EnvSelector } from "../../components/EnvSelector";
 import { PageHeader } from "../../components/PageHeader";
 import { useSettingStore } from "../../stores/useSettingStore";
-import type { EnvFileConfig, EnvVariable, TestEnv } from "../../types/settings";
-import type { AppAuthSourceSummary, AppContextSourceDetail, AppContextSummary } from "../../types/context";
+import type { EnvFileConfig, EnvVariable, TestEnv, VideoMode } from "../../types/settings";
+import type { AppAuthSourceOverview, AppContextOverview, AppContextSourceDetail } from "../../types/context";
+import { CaseTypeSettingsCard } from "./case-type-settings";
+import { filterEnvVariables, type EnvVariableSearchRow } from "./env-variable-search";
+import { isSensitiveKey, parseRunPreferences, upsertVariableValue } from "./run-preferences";
+import { envVariableRowKey } from "./settings-row-key";
+import { envVariablePageSize, routeContextLoadDelayMs, sensitiveUsernameFormName, sensitiveValueFormName } from "./settings-rendering";
 
 const contextBodyLimitMb = Number(import.meta.env.VITE_APP_CONTEXT_BODY_LIMIT_MB || 5);
 
@@ -21,22 +26,31 @@ export default function Settings() {
     slowMo,
     trace,
     screenshot,
+    video,
+    flowLoginTimeoutMs,
+    visualMode,
+    apiBusinessCodeStrict,
     setEnv,
     setHeadless,
     setSlowMo,
     setTrace,
-    setScreenshot
+    setScreenshot,
+    setVideo,
+    setFlowLoginTimeoutMs,
+    setVisualMode,
+    setApiBusinessCodeStrict
   } = useSettingStore();
   const [config, setConfig] = useState<EnvFileConfig>();
   const [variables, setVariables] = useState<EnvVariable[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [variableSearchText, setVariableSearchText] = useState("");
   const [envEditorOpen, setEnvEditorOpen] = useState(false);
   const [envContent, setEnvContent] = useState("");
   const [envContentLoading, setEnvContentLoading] = useState(false);
   const [envContentSaving, setEnvContentSaving] = useState(false);
-  const [routeContext, setRouteContext] = useState<AppContextSummary>();
+  const [routeContext, setRouteContext] = useState<AppContextOverview>();
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeSaving, setRouteSaving] = useState(false);
   const [routeImportingSource, setRouteImportingSource] = useState("");
@@ -55,14 +69,18 @@ export default function Settings() {
     }),
     []
   );
+  const visibleVariables = useMemo(() => filterEnvVariables(variables, variableSearchText), [variables, variableSearchText]);
 
   const syncRunPreferences = (nextVariables: EnvVariable[]) => {
-    const valueOf = (key: string) => nextVariables.find((item) => item.key === key)?.value;
-    const nextSlowMo = Number(valueOf("SLOW_MO") ?? 100);
-    setHeadless(valueOf("HEADLESS") === "true");
-    setSlowMo(Number.isFinite(nextSlowMo) ? nextSlowMo : 100);
-    setTrace(valueOf("TRACE") !== "off");
-    setScreenshot(valueOf("SCREENSHOT") !== "off");
+    const next = parseRunPreferences(nextVariables);
+    setHeadless(next.headless);
+    setSlowMo(next.slowMo);
+    setTrace(next.trace);
+    setScreenshot(next.screenshot);
+    setVideo(next.video);
+    setFlowLoginTimeoutMs(next.flowLoginTimeoutMs);
+    setVisualMode(next.visualMode);
+    setApiBusinessCodeStrict(next.apiBusinessCodeStrict);
   };
 
   const loadConfig = async () => {
@@ -82,7 +100,7 @@ export default function Settings() {
   const loadRouteContext = async () => {
     setRouteLoading(true);
     try {
-      setRouteContext(await getAppContext());
+      setRouteContext(await getAppContextOverview());
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : "读取路由上下文失败");
     } finally {
@@ -95,7 +113,10 @@ export default function Settings() {
   }, [env]);
 
   useEffect(() => {
-    void loadRouteContext();
+    const timer = window.setTimeout(() => {
+      void loadRouteContext();
+    }, routeContextLoadDelayMs);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const updateVariable = (index: number, patch: Partial<EnvVariable>) => {
@@ -114,6 +135,7 @@ export default function Settings() {
   };
 
   const addVariable = () => {
+    setVariableSearchText("");
     setVariables((items) => [...items, { key: "", value: "", source: "file", sensitive: false }]);
   };
 
@@ -168,6 +190,27 @@ export default function Settings() {
   const handleScreenshotChange = (checked: boolean) => {
     setScreenshot(checked);
     applyRunPreference("SCREENSHOT", checked ? "only-on-failure" : "off");
+  };
+
+  const handleVideoChange = (value: VideoMode) => {
+    setVideo(value);
+    applyRunPreference("VIDEO", value);
+  };
+
+  const handleFlowLoginTimeoutChange = (value: number | null) => {
+    const next = Number(value ?? 0);
+    setFlowLoginTimeoutMs(next);
+    applyRunPreference("FLOW_LOGIN_TIMEOUT_MS", String(next));
+  };
+
+  const handleVisualModeChange = (checked: boolean) => {
+    setVisualMode(checked);
+    applyRunPreference("VISUAL_MODE", checked ? "true" : "false");
+  };
+
+  const handleApiBusinessCodeStrictChange = (checked: boolean) => {
+    setApiBusinessCodeStrict(checked);
+    applyRunPreference("API_BUSINESS_CODE_STRICT", checked ? "true" : "false");
   };
 
   const handleSave = async () => {
@@ -349,23 +392,40 @@ export default function Settings() {
     }
   };
 
-  const columns: ColumnsType<EnvVariable> = [
+  const columns: ColumnsType<EnvVariableSearchRow> = [
     {
       title: "变量名",
       dataIndex: "key",
       width: 260,
-      render: (value: string, _record, index) => (
-        <Input value={value} placeholder="例如 USER_LOGIN_URL" onChange={(event) => updateVariable(index, { key: event.target.value })} />
+      render: (value: string, record) => (
+        <Input value={value} placeholder="例如 USER_LOGIN_URL" onChange={(event) => updateVariable(record.originalIndex, { key: event.target.value })} />
       )
     },
     {
       title: "变量值",
       dataIndex: "value",
-      render: (value: string, record, index) =>
+      render: (value: string, record) =>
         record.sensitive ? (
-          <Input.Password value={value} autoComplete="new-password" onChange={(event) => updateVariable(index, { value: event.target.value })} />
+          <form autoComplete="off" onSubmit={(event) => event.preventDefault()}>
+            <input
+              aria-hidden="true"
+              autoComplete="username"
+              className="hidden"
+              name={sensitiveUsernameFormName(record.originalIndex)}
+              readOnly
+              tabIndex={-1}
+              type="text"
+              value={record.key}
+            />
+            <Input.Password
+              name={sensitiveValueFormName(record.originalIndex)}
+              value={value}
+              autoComplete="current-password"
+              onChange={(event) => updateVariable(record.originalIndex, { value: event.target.value })}
+            />
+          </form>
         ) : (
-          <Input value={value} onChange={(event) => updateVariable(index, { value: event.target.value })} />
+          <Input value={value} onChange={(event) => updateVariable(record.originalIndex, { value: event.target.value })} />
         )
     },
     {
@@ -378,22 +438,22 @@ export default function Settings() {
       title: "说明",
       dataIndex: "comment",
       width: 220,
-      render: (value: string | undefined, _record, index) => (
-        <Input value={value} placeholder="可选" onChange={(event) => updateVariable(index, { comment: event.target.value })} />
+      render: (value: string | undefined, record) => (
+        <Input value={value} placeholder="可选" onChange={(event) => updateVariable(record.originalIndex, { comment: event.target.value })} />
       )
     },
     {
       title: "操作",
       width: 80,
-      render: (_value, _record, index) => (
-        <Popconfirm title="删除这个变量？" okText="删除" cancelText="取消" onConfirm={() => removeVariable(index)}>
+      render: (_value, record) => (
+        <Popconfirm title="删除这个变量？" okText="删除" cancelText="取消" onConfirm={() => removeVariable(record.originalIndex)}>
           <Button danger type="text" icon={<DeleteOutlined />} />
         </Popconfirm>
       )
     }
   ];
 
-  const routeColumns: ColumnsType<AppAuthSourceSummary> = [
+  const routeColumns: ColumnsType<AppAuthSourceOverview> = [
     {
       title: "来源",
       dataIndex: "source",
@@ -477,14 +537,14 @@ export default function Settings() {
           </Form>
         </Card>
         <Card title="运行偏好" className="h-full">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-4 gap-2.5">
             <PreferenceItem title="Headless" value={headless ? "true" : "false"}>
               <Switch checked={headless} onChange={handleHeadlessChange} />
             </PreferenceItem>
             <PreferenceItem title="SlowMo" value={`${slowMo} ms`}>
-              <Space.Compact>
-                <InputNumber min={0} max={3000} step={50} value={slowMo} onChange={handleSlowMoChange} />
-                <span className="inline-flex h-8 items-center rounded-r-md border border-l-0 border-slate-300 bg-slate-50 px-3 text-sm text-slate-600">
+              <Space.Compact className="w-full">
+                <InputNumber className="!w-full min-w-0" min={0} max={3000} step={50} value={slowMo} onChange={handleSlowMoChange} />
+                <span className="inline-flex h-8 shrink-0 items-center rounded-r-md border border-l-0 border-slate-300 bg-slate-50 px-3 text-sm text-slate-600">
                   ms
                 </span>
               </Space.Compact>
@@ -494,6 +554,39 @@ export default function Settings() {
             </PreferenceItem>
             <PreferenceItem title="Screenshot" value={screenshot ? "only-on-failure" : "off"}>
               <Switch checked={screenshot} onChange={handleScreenshotChange} />
+            </PreferenceItem>
+            <PreferenceItem title="Video" value={video}>
+              <Select
+                className="!w-full"
+                value={video}
+                onChange={handleVideoChange}
+                options={[
+                  { label: "失败保留", value: "retain-on-failure" },
+                  { label: "开启", value: "on" },
+                  { label: "关闭", value: "off" }
+                ]}
+              />
+            </PreferenceItem>
+            <PreferenceItem title="Login Timeout" value={`${flowLoginTimeoutMs} ms`}>
+              <Space.Compact className="w-full">
+                <InputNumber
+                  className="!w-full min-w-0"
+                  min={1000}
+                  max={60000}
+                  step={1000}
+                  value={flowLoginTimeoutMs}
+                  onChange={handleFlowLoginTimeoutChange}
+                />
+                <span className="inline-flex h-8 shrink-0 items-center rounded-r-md border border-l-0 border-slate-300 bg-slate-50 px-3 text-sm text-slate-600">
+                  ms
+                </span>
+              </Space.Compact>
+            </PreferenceItem>
+            <PreferenceItem title="Visual Mode" value={visualMode ? "true" : "false"}>
+              <Switch checked={visualMode} onChange={handleVisualModeChange} />
+            </PreferenceItem>
+            <PreferenceItem title="Strict API Code" value={apiBusinessCodeStrict ? "true" : "false"}>
+              <Switch checked={apiBusinessCodeStrict} onChange={handleApiBusinessCodeStrictChange} />
             </PreferenceItem>
           </div>
         </Card>
@@ -521,8 +614,21 @@ export default function Settings() {
           scroll={{ y: 260 }}
         />
       </Card>
+      <CaseTypeSettingsCard />
       <Card
-        title="环境变量"
+        title={
+          <Space size={14}>
+            <span>环境变量</span>
+            <Input
+              className="w-[260px]"
+              allowClear
+              prefix={<SearchOutlined className="text-slate-400" />}
+              placeholder="搜索变量名/变量值/说明"
+              value={variableSearchText}
+              onChange={(event) => setVariableSearchText(event.target.value)}
+            />
+          </Space>
+        }
         extra={
           <Space>
             <Button icon={<EditOutlined />} loading={envContentLoading} onClick={() => void openEnvEditor()}>
@@ -567,11 +673,16 @@ export default function Settings() {
         ) : null}
         <Table
           size="middle"
-          rowKey={(record) => record.key || `new-${variables.indexOf(record)}`}
+          rowKey={envVariableRowKey}
           loading={loading}
-          pagination={false}
+          pagination={{
+            pageSize: envVariablePageSize,
+            showSizeChanger: false,
+            hideOnSinglePage: visibleVariables.length <= envVariablePageSize
+          }}
           columns={columns}
-          dataSource={variables}
+          dataSource={visibleVariables}
+          locale={{ emptyText: variableSearchText.trim() ? "没有匹配的环境变量" : "暂无环境变量" }}
           scroll={{ y: "calc(100vh - 520px)" }}
         />
       </Card>
@@ -646,20 +757,8 @@ export default function Settings() {
   );
 }
 
-function isSensitiveKey(key: string): boolean {
-  return /(password|token|secret|key|cookie|authorization|apikey)/i.test(key);
-}
-
 function isRouteSourceKey(source: string): boolean {
   return /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(source.trim());
-}
-
-function upsertVariableValue(variables: EnvVariable[], key: string, value: string): EnvVariable[] {
-  const index = variables.findIndex((item) => item.key === key);
-  if (index < 0) {
-    return [...variables, { key, value, source: "file", sensitive: isSensitiveKey(key) }];
-  }
-  return variables.map((item, itemIndex) => (itemIndex === index ? { ...item, value, source: "file" } : item));
 }
 
 function extractEnvKeys(content: string): string[] {
@@ -685,12 +784,16 @@ function isTestEnv(value: string): value is TestEnv {
 
 function PreferenceItem({ title, value, children }: { title: string; value: string; children: ReactNode }) {
   return (
-    <div className="flex min-h-[86px] items-center justify-between gap-2.5 rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
-      <div className="min-w-0">
-        <div className="text-sm font-medium text-slate-900">{title}</div>
-        <div className="mt-1 truncate text-xs text-slate-500">{value}</div>
+    <div className="flex h-[90px] flex-col justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <div className="min-w-0 truncate text-sm font-medium leading-5 text-slate-900" title={title}>
+          {title}
+        </div>
+        <div className="max-w-[50%] shrink-0 truncate text-right text-xs leading-5 text-slate-500" title={value}>
+          {value}
+        </div>
       </div>
-      <div className="shrink-0">{children}</div>
+      <div className="mt-3 flex min-h-8 w-full items-center justify-end">{children}</div>
     </div>
   );
 }

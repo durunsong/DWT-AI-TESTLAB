@@ -250,6 +250,52 @@ test("new case templates include runtime defaults", async () => {
   assert.equal(parsed.defaults?.wait_for_network, true);
 });
 
+test("lists case type for old and typed scenario yaml", async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "dwt-case-types-list-"));
+  await fs.mkdir(path.join(rootDir, "cases", "scenario"), { recursive: true });
+  await fs.writeFile(path.join(rootDir, "cases", "scenario", "old_case.yaml"), [
+    "case_id: old_case",
+    "case_name: 旧用例",
+    "mode: web",
+    "sessions:",
+    "  - name: user",
+    "    login_url: \"${env.USER_LOGIN_URL}\"",
+    "locations:",
+    "  file: cases/location/login.user.yaml",
+    "steps:",
+    "  - step_id: open_page",
+    "    name: open page",
+    "    type: web_open",
+    "    session: user",
+    "    url: \"${session.login_url}\"",
+    ""
+  ].join("\n"), "utf8");
+  await fs.writeFile(path.join(rootDir, "cases", "scenario", "smoke_case.yaml"), [
+    "case_id: smoke_case",
+    "case_name: 冒烟用例",
+    "case_type: smoke",
+    "mode: web",
+    "sessions:",
+    "  - name: user",
+    "    login_url: \"${env.USER_LOGIN_URL}\"",
+    "locations:",
+    "  file: cases/location/login.user.yaml",
+    "steps:",
+    "  - step_id: open_page",
+    "    name: open page",
+    "    type: web_open",
+    "    session: user",
+    "    url: \"${session.login_url}\"",
+    ""
+  ].join("\n"), "utf8");
+
+  const service = new CaseService({} as ScenarioOrchestrator, rootDir);
+  const cases = await service.listCases();
+
+  assert.equal(cases.find((item) => item.caseId === "old_case")?.caseType, "uncategorized");
+  assert.equal(cases.find((item) => item.caseId === "smoke_case")?.caseType, "smoke");
+});
+
 test("preserves object expected for DB assertions in AI drafts", () => {
   const service = new CaseService({} as ScenarioOrchestrator, process.cwd());
   const normalized = service.normalizeGeneratedYaml([

@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { buildFailureAnalysisMessages, OpenAiCompatibleClient } from "@ai-e2e/ai-generator";
 import { resolveArtifactBaseDir, ScenarioOrchestrator, type PlatformArtifactKind, type PlatformConfig } from "@ai-e2e/runner";
-import { maskSensitive, type CreateTestRunRequest, type RunReport, type StepResult, type TestRunEvent, type TestRunSummary } from "@ai-e2e/shared";
+import { maskSensitive, type BatchRunItem, type BatchTestRunSummary, type CreateBatchTestRunRequest, type CreateBatchTestRunResponse, type CreateTestRunRequest, type RunReport, type StepResult, type TestRunEvent, type TestRunSummary } from "@ai-e2e/shared";
 import { imageMimeType } from "./ai-screenshot";
 import type { AiReportService } from "./ai-report.service";
 import type { EnvConfigService } from "./env-config.service";
@@ -12,6 +12,7 @@ import { createNextRunId } from "./run-id";
 
 export class TestRunService {
   private readonly runs = new Map<string, TestRunSummary>();
+  private readonly batches = new Map<string, BatchTestRunSummary>();
   private readonly events = new EventEmitter();
 
   constructor(
@@ -25,6 +26,63 @@ export class TestRunService {
   }
 
   async start(request: CreateTestRunRequest): Promise<TestRunSummary> {
+    const summary = await this.createRunSummary(request);
+    void this.executeRun(summary).catch(() => undefined);
+    return summary;
+  }
+
+  async startBatch(request: CreateBatchTestRunRequest): Promise<CreateBatchTestRunResponse> {
+    const env = normalizeTestEnv(request.env);
+    await this.envConfigService?.applyToProcess(env);
+    const caseIds = [...new Set(request.caseIds.map((caseId) => caseId.trim()).filter(Boolean))];
+    if (!caseIds.length) {
+      throw new Error("批量运行至少需要选择一个用例");
+    }
+
+    const cases = await this.runner.listCases();
+    const caseMetaById = new Map(cases.map((item) => [item.case_id, item]));
+    const items: BatchRunItem[] = caseIds.map((caseId) => {
+      const meta = caseMetaById.get(caseId);
+      return {
+        caseId,
+        caseName: meta?.case_name ?? caseId,
+        caseType: meta?.case_type ?? "uncategorized",
+        status: "pending"
+      };
+    });
+    const batchId = `batch_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+    const startedAt = new Date().toISOString();
+    const batch: BatchTestRunSummary = {
+      batchId,
+      env,
+      status: "running",
+      total: items.length,
+      passed: 0,
+      failed: 0,
+      startedAt,
+      running: 0,
+      pending: items.length,
+      items
+    };
+    this.batches.set(batchId, batch);
+
+    void this.executeBatch(batch).catch(() => undefined);
+    return { batchId, status: "running", total: batch.total, runIds: [] };
+  }
+
+  getBatch(batchId: string): BatchTestRunSummary {
+    const batch = this.batches.get(batchId);
+    if (!batch) {
+      throw new Error(`未找到批量运行记录：${batchId}`);
+    }
+    return batch;
+  }
+
+  findBatch(batchId: string): BatchTestRunSummary | null {
+    return this.batches.get(batchId) ?? null;
+  }
+
+  private async createRunSummary(request: CreateTestRunRequest): Promise<TestRunSummary> {
     const env = normalizeTestEnv(request.env);
     await this.envConfigService?.applyToProcess(env);
     const runId = await createNextRunId(this.rootDir, request.caseId, this.platformConfig);
@@ -43,28 +101,64 @@ export class TestRunService {
       reportLinks: this.links(runId)
     };
     this.runs.set(runId, summary);
+    return summary;
+  }
 
-    void this.runner.run({
-      runId,
-      caseId: request.caseId,
-      env,
-      onEvent: (event) => {
-        if (event.type !== "run_finished") {
-          this.applyEvent(summary, event);
-        }
+  private async executeBatch(batch: BatchTestRunSummary): Promise<void> {
+    for (const item of batch.items) {
+      item.status = "running";
+      item.startedAt = new Date().toISOString();
+      this.refreshBatchStats(batch);
+      try {
+        const summary = await this.createRunSummary({ caseId: item.caseId, env: batch.env });
+        item.runId = summary.runId;
+        item.reportLinks = summary.reportLinks;
+        await this.executeRun(summary);
+        item.caseName = summary.caseName ?? item.caseName;
+        item.status = summary.status === "passed" ? "passed" : "failed";
+        item.endedAt = summary.endedAt;
+        item.reportLinks = summary.reportLinks;
+      } catch (error) {
+        item.status = "failed";
+        item.endedAt = new Date().toISOString();
+        item.error = error instanceof Error ? error.message : String(error);
       }
-    }).then((report) => {
+      this.refreshBatchStats(batch);
+    }
+    batch.endedAt = new Date().toISOString();
+    this.refreshBatchStats(batch);
+  }
+
+  private refreshBatchStats(batch: BatchTestRunSummary): void {
+    batch.passed = batch.items.filter((item) => item.status === "passed").length;
+    batch.failed = batch.items.filter((item) => item.status === "failed").length;
+    batch.running = batch.items.filter((item) => item.status === "running").length;
+    batch.pending = batch.items.filter((item) => item.status === "pending").length;
+    batch.status = batch.running > 0 || batch.pending > 0 ? "running" : batch.failed > 0 ? "failed" : "passed";
+  }
+
+  private async executeRun(summary: TestRunSummary): Promise<void> {
+    try {
+      const report = await this.runner.run({
+        runId: summary.runId,
+        caseId: summary.caseId,
+        env: summary.env,
+        onEvent: (event) => {
+          if (event.type !== "run_finished") {
+            this.applyEvent(summary, event);
+          }
+        }
+      });
       this.applyReport(summary, report);
-      return this.analyzeFailure(summary, report);
-    }).then(() => {
+      await this.analyzeFailure(summary, report);
       this.emit({
-        runId,
+        runId: summary.runId,
         type: "run_finished",
         status: summary.status,
         at: summary.endedAt ?? new Date().toISOString(),
         message: summary.steps.find((step) => step.status === "failed")?.error
       });
-    }).catch((error) => {
+    } catch (error) {
       summary.status = "failed";
       summary.endedAt = new Date().toISOString();
       summary.durationMs = new Date(summary.endedAt).getTime() - new Date(summary.startedAt).getTime();
@@ -77,14 +171,12 @@ export class TestRunService {
       }];
       summary.total = 1;
       summary.failed = 1;
-      this.emit({ runId, type: "run_finished", status: "failed", at: summary.endedAt, message: summary.steps[0]?.error });
-    });
-
-    return summary;
+      this.emit({ runId: summary.runId, type: "run_finished", status: "failed", at: summary.endedAt, message: summary.steps[0]?.error });
+    }
   }
 
   get(runId: string): TestRunSummary {
-    const run = this.runs.get(runId);
+    const run = runId === "latest" ? this.latestRun() : this.runs.get(runId);
     if (!run) {
       throw new Error(`未找到运行记录：${runId}`);
     }
@@ -92,9 +184,18 @@ export class TestRunService {
   }
 
   subscribe(runId: string, listener: (event: TestRunEvent) => void): () => void {
-    const key = `run:${runId}`;
+    const resolvedRunId = runId === "latest" ? this.latestRun()?.runId : runId;
+    if (!resolvedRunId) {
+      return () => undefined;
+    }
+    const key = `run:${resolvedRunId}`;
     this.events.on(key, listener);
     return () => this.events.off(key, listener);
+  }
+
+  latestRun(): TestRunSummary | undefined {
+    return [...this.runs.values()]
+      .sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))[0];
   }
 
   private applyEvent(summary: TestRunSummary, event: TestRunEvent): void {
@@ -262,7 +363,8 @@ export class TestRunService {
       html: `/reports/${runId}.html`,
       logs: `/api/test-runs/${runId}/logs`,
       screenshots: `/screenshots/${runId}`,
-      traces: `/traces/${runId}`
+      traces: `/traces/${runId}`,
+      videos: `/videos/${runId}`
     };
   }
 

@@ -6,7 +6,10 @@
   "server": {
     "host": "127.0.0.1",
     "port": 4300,
-    "corsOrigins": ["http://127.0.0.1:4301", "http://localhost:4301"]
+    "corsOrigins": [
+      "http://127.0.0.1:4301",
+      "http://localhost:4301"
+    ]
   },
   "web": {
     "host": "0.0.0.0",
@@ -31,13 +34,22 @@
     }
   },
   "workspace": {
-    "directories": ["cases", "logs", "reports", "screenshots", "traces", "uploads"]
+    "directories": [
+      "cases",
+      "logs",
+      "reports",
+      "screenshots",
+      "traces",
+      "videos",
+      "uploads"
+    ]
   },
   "artifacts": {
     "logsDir": "logs",
     "reportsDir": "reports",
     "screenshotsDir": "screenshots",
-    "tracesDir": "traces"
+    "tracesDir": "traces",
+    "videosDir": "videos"
   },
   "browser": {
     "defaultViewport": {
@@ -46,10 +58,23 @@
     }
   },
   "context": {
-    "defaultSources": ["user", "admin"],
+    "defaultSources": [
+      "user",
+      "admin"
+    ],
     "routeGroups": {
-      "enterpriseKeywords": ["企业", "enterprise", "认证", "auth"],
-      "approvalKeywords": ["审批", "审核", "approve", "review"]
+      "enterpriseKeywords": [
+        "企业",
+        "enterprise",
+        "认证",
+        "auth"
+      ],
+      "approvalKeywords": [
+        "审批",
+        "审核",
+        "approve",
+        "review"
+      ]
     }
   },
   "uploads": {
@@ -59,5 +84,42 @@
     "caseAttachmentBaseDir": "uploads/cases",
     "materialSourceMaxChars": 18000,
     "materialLinkMaxChars": 24000
-  }
+  },
+  "caseTypes": [
+    {
+      "key": "uncategorized",
+      "label": "未分类",
+      "enabled": true,
+      "sort": 0,
+      "description": "默认类型，用于兼容未配置类型的历史用例。"
+    },
+    {
+      "key": "admin-mian",
+      "label": "admin-main",
+      "enabled": true,
+      "sort": 10,
+      "description": "admin-主流程,每次部署之后都会进行的测试"
+    },
+    {
+      "key": "admin-smoke",
+      "label": "admin-smoke",
+      "enabled": true,
+      "sort": 20,
+      "description": "admin-冒烟测试"
+    },
+    {
+      "key": "user-main",
+      "label": "user-main",
+      "enabled": true,
+      "sort": 30,
+      "description": "user-主流程,每次部署之后都会进行的测试"
+    },
+    {
+      "key": "user-smoke",
+      "label": "user-smoke",
+      "enabled": true,
+      "sort": 40,
+      "description": "user-冒烟测试"
+    }
+  ]
 }

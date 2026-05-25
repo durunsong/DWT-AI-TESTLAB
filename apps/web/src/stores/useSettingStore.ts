@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { TestEnv } from "../types/settings";
+import type { TestEnv, VideoMode } from "../types/settings";
 
 interface SettingState {
   env: TestEnv;
@@ -7,11 +7,19 @@ interface SettingState {
   slowMo: number;
   trace: boolean;
   screenshot: boolean;
+  video: VideoMode;
+  flowLoginTimeoutMs: number;
+  visualMode: boolean;
+  apiBusinessCodeStrict: boolean;
   setEnv: (env: TestEnv) => void;
   setHeadless: (headless: boolean) => void;
   setSlowMo: (slowMo: number) => void;
   setTrace: (trace: boolean) => void;
   setScreenshot: (screenshot: boolean) => void;
+  setVideo: (video: VideoMode) => void;
+  setFlowLoginTimeoutMs: (flowLoginTimeoutMs: number) => void;
+  setVisualMode: (visualMode: boolean) => void;
+  setApiBusinessCodeStrict: (apiBusinessCodeStrict: boolean) => void;
 }
 
 const storageKey = import.meta.env.VITE_APP_STORAGE_KEY || "dwt-testing-settings";
@@ -23,11 +31,19 @@ export const useSettingStore = create<SettingState>((set) => ({
   slowMo: saved.slowMo ?? 100,
   trace: saved.trace ?? true,
   screenshot: saved.screenshot ?? true,
+  video: saved.video ?? "retain-on-failure",
+  flowLoginTimeoutMs: saved.flowLoginTimeoutMs ?? 3000,
+  visualMode: saved.visualMode ?? false,
+  apiBusinessCodeStrict: saved.apiBusinessCodeStrict ?? true,
   setEnv: (env) => setAndPersist(set, { env }),
   setHeadless: (headless) => setAndPersist(set, { headless }),
   setSlowMo: (slowMo) => setAndPersist(set, { slowMo }),
   setTrace: (trace) => setAndPersist(set, { trace }),
-  setScreenshot: (screenshot) => setAndPersist(set, { screenshot })
+  setScreenshot: (screenshot) => setAndPersist(set, { screenshot }),
+  setVideo: (video) => setAndPersist(set, { video }),
+  setFlowLoginTimeoutMs: (flowLoginTimeoutMs) => setAndPersist(set, { flowLoginTimeoutMs }),
+  setVisualMode: (visualMode) => setAndPersist(set, { visualMode }),
+  setApiBusinessCodeStrict: (apiBusinessCodeStrict) => setAndPersist(set, { apiBusinessCodeStrict })
 }));
 
 function setAndPersist(set: (partial: Partial<SettingState>) => void, partial: Partial<SettingState>) {

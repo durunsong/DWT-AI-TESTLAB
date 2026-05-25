@@ -1,9 +1,23 @@
 import type { FastifyInstance } from "fastify";
+import type { PlatformCaseType } from "@ai-e2e/runner";
 import type { EnvConfigService, EnvVariable } from "../services/env-config.service";
 import { normalizeTestEnv } from "../services/env-config.service";
+import type { PlatformSettingsService } from "../services/platform-settings.service";
 import { ok } from "../utils/response";
 
-export async function registerSettingsRoutes(app: FastifyInstance, envConfigService: EnvConfigService): Promise<void> {
+export async function registerSettingsRoutes(
+  app: FastifyInstance,
+  envConfigService: EnvConfigService,
+  platformSettingsService: PlatformSettingsService
+): Promise<void> {
+  app.get("/api/settings/case-types", async () => {
+    return ok(await platformSettingsService.listCaseTypes());
+  });
+
+  app.put<{ Body: { caseTypes?: PlatformCaseType[] } }>("/api/settings/case-types", async (request) => {
+    return ok(await platformSettingsService.saveCaseTypes(request.body.caseTypes ?? []));
+  });
+
   app.get("/api/settings/env-files", async () => {
     return ok(await envConfigService.list());
   });

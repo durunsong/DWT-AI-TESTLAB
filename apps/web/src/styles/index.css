@@ -138,6 +138,38 @@
     color: #e2e8f0;
   }
 
+  .report-viewer,
+  .report-viewer .ant-card,
+  .report-viewer .ant-card-body,
+  .report-viewer .ant-alert,
+  .report-viewer .ant-alert-content,
+  .report-viewer .ant-row,
+  .report-viewer .ant-col,
+  .report-viewer .ant-table-wrapper {
+    min-width: 0;
+  }
+
+  .report-viewer__developer-summary {
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .report-viewer__long-text {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .report-viewer .ant-alert-description {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .report-viewer .report-step-table .ant-table-cell {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
   .report-step-table .ant-table {
     background: #fff;
   }

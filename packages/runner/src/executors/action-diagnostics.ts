@@ -39,7 +39,7 @@ export interface TrackedInput {
   expectedValue: string;
 }
 
-const protectedInputPattern = /(?:password|passwd|pwd|token|secret|cookie|authorization|username|account|email|mail|mobile|phone|手机号|邮箱|账号|账户|用户名|密码)/i;
+const protectedInputPattern = /(?:password|passwd|pwd|token|secret|cookie|authorization|api[_-]?key|access[_-]?key|密码|令牌|密钥)/i;
 
 export function buildInputValueDiagnostic(input: BuildInputValueDiagnosticInput): InputValueDiagnostic {
   const protectedValue = isProtectedInputTarget(input.target);

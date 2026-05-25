@@ -16,6 +16,14 @@ export interface AppContextSourceDetail {
   summary: AppAuthSourceSummary;
 }
 
+export type AppAuthSourceOverview = Omit<AppAuthSourceSummary, "routes" | "enterpriseRoutes" | "approvalRoutes">;
+
+export interface AppContextOverview {
+  user: AppAuthSourceOverview;
+  admin: AppAuthSourceOverview;
+  sources: AppAuthSourceOverview[];
+}
+
 type SourceMeta = Record<string, SourceMetaItem | undefined>;
 
 interface SourceMetaItem {
@@ -37,6 +45,15 @@ export class AppContextService {
     const user = sourceMap.get("user") ?? createEmptyAppAuthSource("user");
     const admin = sourceMap.get("admin") ?? createEmptyAppAuthSource("admin");
     return { user, admin, sources };
+  }
+
+  async getContextOverview(): Promise<AppContextOverview> {
+    const context = await this.getContext();
+    return {
+      user: toSourceOverview(context.user),
+      admin: toSourceOverview(context.admin),
+      sources: context.sources.map(toSourceOverview)
+    };
   }
 
   async getSource(source: string): Promise<AppContextSourceDetail> {
@@ -149,6 +166,11 @@ export class AppContextService {
   private parseSourceContent(source: string, fileName: string, content: string): AppAuthSourceSummary {
     return parseAppAuthSourceContent(source, fileName, content, this.platformConfig.context.routeGroups);
   }
+}
+
+function toSourceOverview(source: AppAuthSourceSummary): AppAuthSourceOverview {
+  const { routes: _routes, enterpriseRoutes: _enterpriseRoutes, approvalRoutes: _approvalRoutes, ...overview } = source;
+  return overview;
 }
 
 function sanitizeFileName(fileName: string): string {

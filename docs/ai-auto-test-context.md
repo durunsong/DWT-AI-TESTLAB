@@ -1,15 +1,34 @@
 # AI 自动化测试平台上下文
 
-本平台使用 React 控制台触发 Fastify API，由 runner 读取 YAML DSL 并使用 Playwright 执行业务页面流程。AI 后续只能生成 DSL 草稿和公共配置，生成结果必须先经过 Zod 校验，校验失败禁止执行。
+本平台使用 React 控制台或 CLI 触发 Fastify API，由 runner 读取 YAML DSL，并使用 Playwright、fetch 和 mysql2 执行业务流程。
 
-P0 只覆盖页面流程和页面断言，不依赖数据库。API 校验和 DB 校验保留在执行器接口中，后续作为 P1 扩展。
+AI 能力用于生成 DSL 草稿、补充定位建议、分析失败截图和整理资料。AI 输出必须先经过人工审阅、DSL 校验和运行前预检，不能直接绕过校验执行。
 
-## `${APP_BRAND_NAME}` 业务上下文
+## 平台能力边界
 
-当前平台在设置页维护业务路由来源，默认保留 user/admin 两个来源，也支持新增其他来源标识。导入或编辑后会保存到本地 `uploads/app-context/`，刷新页面后继续生效；工作台首页只展示只读摘要。
+- Web 流程：支持多 session、页面操作、上传、等待、断言、截图和 trace。
+- API 流程：支持请求、状态码、业务码、响应字段断言、变量保存，并可复用浏览器 session cookie。
+- DB 流程：支持只读查询和断言，必须配置 `DB_ENABLED=true`，且只能执行 `select/show/desc/describe/explain`。
+- 预检：在执行前检查 DSL、环境变量、定位文件、API baseUrl、DB 开关和上传文件。
+- 生产保护：`prod/production` 和疑似生产域名会被运行守卫拦截。
 
-路由来源不限定为某个业务项目的登录返回。解析器支持登录返回里的 `data.auths`，也支持直接路由数组、JS/TS 路由模块、`routes`、`auths`、`menus`、`menuList` 等常见路由/菜单结构。读取后只保留脱敏后的用户摘要、路由数量、企业/认证相关 user 路由、审批/审核相关 admin 路由。`token`、密码、cookie 等敏感字段不会进入上下文摘要、日志或报告；原始上传内容仅用于本地查看和修改。
+## 业务上下文
+
+当前平台在设置页维护业务路由来源，默认保留 `user` / `admin` 两个来源，也支持新增其他来源标识。
+
+导入或编辑后，上下文默认保存到本地 `uploads/app-context/`。这些内容只用于本地调试和 AI 辅助生成，不应进入交付包或提交记录。
+
+解析器支持常见结构：
+
+- 登录返回里的 `data.auths`。
+- 直接路由数组。
+- JS/TS 路由模块。
+- `routes`、`auths`、`menus`、`menuList` 等菜单字段。
+
+平台会提取脱敏后的用户摘要、路由数量、企业/认证相关 user 路由、审批/审核相关 admin 路由。`token`、密码、cookie 等敏感字段不应进入上下文摘要、日志或报告。
 
 ## DB 配置策略
 
-真实数据库连接只写入本地 `.env`，不写入 `.env.example`、源码或文档。DB 执行器只允许 `select/show/desc/describe/explain` 只读语句，并继续拦截 `drop/truncate/alter/create/insert/update/delete/grant/revoke` 等危险语句。
+真实数据库连接只写入本地 `.env*` 或 CI Secret，不写入 `.env.example`、源码或文档。
+
+DB 执行器只允许只读语句，并拦截 `drop/truncate/alter/create/insert/replace/update/delete/grant/revoke` 等危险语句。`db_clean` 当前不开放，执行时会直接报错。

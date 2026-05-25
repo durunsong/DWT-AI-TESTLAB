@@ -10,7 +10,7 @@
 pnpm setup:platform --brand="你的团队" --product="你的测试平台" --user-login-url="https://example.com/user/login" --admin-login-url="https://example.com/admin/login"
 ```
 
-2. 修改 `.env` 中的账号、密码、接口地址、AI 服务和 DB 只读账号。
+2. 修改本地 `.env*` 中的账号、密码、接口地址、AI 服务和 DB 只读账号。
 3. 修改 `platform.config.json` 中的端口、桌面端信息、上下文来源、上传限制、产物目录、浏览器视口和路由关键词。
 4. 在 `cases/location/` 中维护页面定位。
 5. 在 `cases/scenario/` 中新增或改造 YAML 用例。
@@ -39,7 +39,7 @@ pnpm dev
 - `desktop.appId` / `desktop.productName` / `desktop.maintainer`：桌面端打包标识和安装包展示信息。
 - `desktop.window`：桌面端窗口标题、默认尺寸和最小尺寸。
 - `workspace.directories`：桌面端首次启动需要创建的工作目录。
-- `artifacts.logsDir` / `artifacts.reportsDir` / `artifacts.screenshotsDir` / `artifacts.tracesDir`：运行产物目录。
+- `artifacts.logsDir` / `artifacts.reportsDir` / `artifacts.screenshotsDir` / `artifacts.tracesDir` / `artifacts.videosDir`：运行产物目录。
 - `browser.defaultViewport`：Playwright 默认视口。
 - `context.defaultSources`：设置页默认展示和维护的路由来源，例如 `user/admin/operator`。
 - `context.routeGroups`：从路由菜单里提取业务分组的关键词。
@@ -58,6 +58,8 @@ pnpm dev
 - `HEADLESS` / `SLOW_MO` / `VISUAL_MODE`：浏览器运行体验。
 - `BROWSER_VIEWPORT_WIDTH` / `BROWSER_VIEWPORT_HEIGHT`：临时覆盖默认视口。
 
+`prod` 可用于配置和构建场景，但自动化运行会拦截 `prod/production` 环境和疑似生产域名。
+
 ## 用例迁移建议
 
 - 先保留 `user` 和 `admin` 两个 session 名，等主流程稳定后再扩展更多业务端。
@@ -68,7 +70,7 @@ pnpm dev
 
 ## 数据和目录
 
-- 本地运行产物默认在 `logs/`、`reports/`、`screenshots/`、`traces/`。
+- 本地运行产物默认在 `logs/`、`reports/`、`screenshots/`、`traces/`、`videos/`。
 - 产物目录可通过 `platform.config.json` 的 `artifacts` 改为其他项目根目录内的相对路径。
 - 上传资料、用例附件和路由上下文默认在 `uploads/`。
 - 业务上下文默认写入 `uploads/app-context/`。
@@ -76,7 +78,7 @@ pnpm dev
 ## 交付前检查
 
 - `.env.example` 只保留占位值。
-- `.env`、报告、截图、trace、上传资料不进入交付包。
+- `.env*`、报告、截图、trace、视频、上传资料不进入交付包。
 - `pnpm ci:check` 通过。
 - README 中的平台名称、截图、用例示例符合当前团队语境。
 - 桌面端如需分发，确认图标、应用 ID、签名和安装包名称已经替换。

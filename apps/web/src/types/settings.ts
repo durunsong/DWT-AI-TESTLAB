@@ -1,4 +1,5 @@
 export type TestEnv = "local" | "dev" | "sit" | "prod";
+export type VideoMode = "off" | "on" | "retain-on-failure";
 
 export interface EnvVariable {
   key: string;
@@ -31,4 +32,16 @@ export interface RunSettings {
   slowMo: number;
   trace: boolean;
   screenshot: boolean;
+  video: VideoMode;
+  flowLoginTimeoutMs: number;
+  visualMode: boolean;
+  apiBusinessCodeStrict: boolean;
+}
+
+export interface CaseTypeConfig {
+  key: string;
+  label: string;
+  enabled: boolean;
+  sort: number;
+  description?: string;
 }

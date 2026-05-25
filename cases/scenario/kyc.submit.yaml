@@ -1,6 +1,7 @@
-case_id: kyc_submit
-case_name: KYC 提交流程
-description: user 端进入 KYC 页面并提交企业认证。
+case_id: "kyc_submit"
+case_name: "KYC 提交流程"
+case_type: "user-main"
+description: "user 端进入 KYC 页面并提交企业认证。"
 mode: web
 defaults:
   step_timeout_ms: 20000

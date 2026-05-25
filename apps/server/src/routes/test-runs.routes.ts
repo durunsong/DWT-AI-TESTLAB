@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
-import type { CreateTestRunRequest } from "@ai-e2e/shared";
-import type { ArtifactKind, ReportService } from "../services/report.service";
+import type { CreateBatchTestRunRequest, CreateTestRunRequest, TestRunSummary } from "@ai-e2e/shared";
+import type { ArtifactKind, ReportService, RunHistoryItem } from "../services/report.service";
 import type { TestRunService } from "../services/test-run.service";
 import { ok } from "../utils/response";
 
@@ -16,8 +16,16 @@ export async function registerTestRunRoutes(
     return ok({ runId: run.runId, status: run.status });
   });
 
+  app.post<{ Body: CreateBatchTestRunRequest }>("/api/test-runs/batch", async (request) => {
+    return ok(await testRunService.startBatch(request.body));
+  });
+
+  app.get<{ Params: { batchId: string } }>("/api/test-runs/batch/:batchId", async (request) => {
+    return ok(testRunService.findBatch(request.params.batchId));
+  });
+
   app.get("/api/test-runs/history", async () => {
-    return ok(await reportService.listHistory());
+    return ok(mergeRunningRunIntoHistory(await reportService.listHistory(), testRunService.latestRun()));
   });
 
   app.get("/api/artifacts", async () => {
@@ -29,7 +37,7 @@ export async function registerTestRunRoutes(
   });
 
   app.post<{ Body: { kinds?: ArtifactKind[] } }>("/api/artifacts/clear", async (request) => {
-    const defaultKinds: ArtifactKind[] = ["logs", "screenshots", "reports", "traces", "ai-reports"];
+    const defaultKinds: ArtifactKind[] = ["logs", "screenshots", "reports", "traces", "videos", "ai-reports"];
     const kinds = request.body.kinds?.length ? request.body.kinds : defaultKinds;
     return ok(await reportService.clearArtifacts(kinds));
   });
@@ -40,6 +48,10 @@ export async function registerTestRunRoutes(
 
   app.get<{ Params: { runId: string } }>("/api/test-runs/:runId", async (request) => {
     if (request.params.runId === "latest") {
+      const running = testRunService.latestRun();
+      if (running) {
+        return ok(running);
+      }
       const latest = (await reportService.listHistory())[0];
       return ok(latest ? await reportService.readRunSummary(latest.runId) : null);
     }
@@ -53,18 +65,36 @@ export async function registerTestRunRoutes(
 
   app.get<{ Params: { runId: string } }>("/api/test-runs/:runId/report", async (request) => {
     if (request.params.runId === "latest") {
+      const running = testRunService.latestRun();
+      if (running) {
+        return ok(running.status === "running" ? null : await reportService.readJsonReport(running.runId).catch(() => null));
+      }
       const latest = (await reportService.listHistory())[0];
       return ok(latest ? await reportService.readJsonReport(latest.runId) : null);
     }
-    return ok(await reportService.readJsonReport(request.params.runId));
+    try {
+      testRunService.get(request.params.runId);
+      return ok(await reportService.readJsonReport(request.params.runId).catch(() => null));
+    } catch {
+      return ok(await reportService.readJsonReport(request.params.runId));
+    }
   });
 
   app.get<{ Params: { runId: string } }>("/api/test-runs/:runId/logs", async (request) => {
     if (request.params.runId === "latest") {
+      const running = testRunService.latestRun();
+      if (running) {
+        return ok(await reportService.readLog(running.runId).catch(() => ""));
+      }
       const latest = (await reportService.listHistory())[0];
       return ok(latest ? await reportService.readLog(latest.runId) : "");
     }
-    return ok(await reportService.readLog(request.params.runId));
+    try {
+      testRunService.get(request.params.runId);
+      return ok(await reportService.readLog(request.params.runId).catch(() => ""));
+    } catch {
+      return ok(await reportService.readLog(request.params.runId));
+    }
   });
 
   app.get<{ Params: { runId: string; file: string } }>("/reports/:file", async (request, reply) => {
@@ -88,4 +118,41 @@ export async function registerTestRunRoutes(
     reply.type("application/zip");
     return fs.readFile(filePath);
   });
+
+  app.get<{ Params: { runId: string; file: string } }>("/videos/:runId/:file", async (request, reply) => {
+    const filePath = testRunService.artifactPath("videos", path.basename(request.params.runId), path.basename(request.params.file));
+    reply.type("video/webm");
+    return fs.readFile(filePath);
+  });
+}
+
+export function mergeRunningRunIntoHistory(history: RunHistoryItem[], latestRun: TestRunSummary | undefined): RunHistoryItem[] {
+  if (!latestRun || latestRun.status !== "running" || history.some((item) => item.runId === latestRun.runId)) {
+    return history;
+  }
+
+  const runningItem: RunHistoryItem = {
+    runId: latestRun.runId,
+    caseId: latestRun.caseId,
+    caseName: latestRun.caseName ?? latestRun.caseId,
+    env: latestRun.env,
+    status: latestRun.status,
+    startedAt: latestRun.startedAt,
+    endedAt: latestRun.endedAt,
+    durationMs: latestRun.durationMs,
+    total: latestRun.total,
+    passed: latestRun.passed,
+    failed: latestRun.failed,
+    skipped: latestRun.skipped,
+    reportLinks: {
+      html: latestRun.reportLinks.html ?? `/reports/${latestRun.runId}.html`,
+      json: latestRun.reportLinks.json ?? `/api/test-runs/${latestRun.runId}/report`,
+      logs: latestRun.reportLinks.logs ?? `/api/test-runs/${latestRun.runId}/logs`,
+      screenshots: latestRun.reportLinks.screenshots ?? `/screenshots/${latestRun.runId}`,
+      traces: latestRun.reportLinks.traces ?? `/traces/${latestRun.runId}`,
+      videos: latestRun.reportLinks.videos ?? `/videos/${latestRun.runId}`
+    }
+  };
+
+  return [runningItem, ...history].sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
 }
