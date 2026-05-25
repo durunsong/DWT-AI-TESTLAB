@@ -23,6 +23,7 @@ export interface TestRunSummary {
     logs?: string;
     screenshots?: string;
     traces?: string;
+    videos?: string;
   };
 }
 
@@ -34,6 +35,46 @@ export interface CreateTestRunRequest {
 export interface CreateTestRunResponse {
   runId: string;
   status: RunStatus;
+}
+
+export interface CreateBatchTestRunRequest {
+  caseIds: string[];
+  env: string;
+}
+
+export type BatchRunStatus = "pending" | "running" | "passed" | "failed";
+
+export interface BatchRunItem {
+  caseId: string;
+  caseName: string;
+  caseType: string;
+  runId?: string;
+  status: BatchRunStatus;
+  startedAt?: string;
+  endedAt?: string;
+  reportLinks?: TestRunSummary["reportLinks"];
+  error?: string;
+}
+
+export interface BatchTestRunSummary {
+  batchId: string;
+  env: string;
+  status: Exclude<BatchRunStatus, "pending">;
+  total: number;
+  passed: number;
+  failed: number;
+  running: number;
+  pending: number;
+  startedAt: string;
+  endedAt?: string;
+  items: BatchRunItem[];
+}
+
+export interface CreateBatchTestRunResponse {
+  batchId: string;
+  status: "running";
+  total: number;
+  runIds?: string[];
 }
 
 export interface TestRunEvent {

@@ -25,6 +25,7 @@ export function ReportLinks({ run }: ReportLinksProps) {
       <LinkButton label="截图查看" disabled={!run?.runId} icon={<FolderOpenOutlined />} onClick={() => openReport("screenshots")} />
       <LinkButton label="AI 分析" disabled={!run?.runId} icon={<RobotOutlined />} onClick={() => openReport("ai-analysis")} />
       <LinkButton label="Trace 目录" disabled={!run?.runId} icon={<FolderOpenOutlined />} onClick={() => openReport("traces")} />
+      <LinkButton label="视频目录" disabled={!run?.runId} icon={<FolderOpenOutlined />} onClick={() => openReport("videos")} />
       <LinkButton label="运行日志" disabled={!run?.runId} icon={<FileTextOutlined />} onClick={() => openReport("logs")} />
     </Space>
   );

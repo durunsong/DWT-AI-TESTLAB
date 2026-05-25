@@ -54,7 +54,8 @@ export default defineConfig(({ mode }) => {
         "/api": apiProxyTarget,
         "^/reports/.*\\.(html|json)$": apiProxyTarget,
         "/screenshots": apiProxyTarget,
-        "/traces": apiProxyTarget
+        "/traces": apiProxyTarget,
+        "/videos": apiProxyTarget
       }
     },
     build: {

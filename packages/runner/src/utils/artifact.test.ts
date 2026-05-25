@@ -14,7 +14,8 @@ test("creates artifact paths from configured directories", async () => {
       logsDir: "runtime/logs",
       reportsDir: "runtime/reports",
       screenshotsDir: "runtime/screenshots",
-      tracesDir: "runtime/traces"
+      tracesDir: "runtime/traces",
+      videosDir: "runtime/videos"
     }
   });
 
@@ -22,4 +23,5 @@ test("creates artifact paths from configured directories", async () => {
   assert.equal(artifacts.jsonReport, path.join(rootDir, "runtime/reports/0001_case.json"));
   assert.equal(artifacts.screenshotsDir, path.join(rootDir, "runtime/screenshots/0001_case"));
   assert.equal(artifacts.tracesDir, path.join(rootDir, "runtime/traces/0001_case"));
+  assert.equal(artifacts.videosDir, path.join(rootDir, "runtime/videos/0001_case"));
 });

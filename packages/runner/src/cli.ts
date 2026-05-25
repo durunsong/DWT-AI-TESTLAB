@@ -6,6 +6,7 @@ import { preflightScenarioContent } from "./preflight/scenario-preflight";
 import { ScenarioLoader, validateScenarioContent, validateScenarioContentForRun } from "./loader/scenario-loader";
 import { ScenarioOrchestrator } from "./orchestrator/scenario-orchestrator";
 import { loadPlatformConfig } from "./config/platform-config";
+import { buildDoctorReport, formatDoctorReport } from "./cli-doctor";
 
 interface CliOptions {
   env: string;
@@ -30,6 +31,11 @@ async function main(): Promise<void> {
 
   if (command === "validate") {
     await validateCases(rootDir, args.filter((arg) => !arg.startsWith("--"))[0]);
+    return;
+  }
+
+  if (command === "doctor" || command === "setup") {
+    await doctor(rootDir, options);
     return;
   }
 
@@ -91,6 +97,17 @@ async function validateCases(rootDir: string, target?: string): Promise<void> {
 
   if (failed > 0) {
     throw new Error(`DSL 校验失败：${failed}/${files.length}`);
+  }
+}
+
+async function doctor(rootDir: string, options: CliOptions): Promise<void> {
+  if (options.envFile !== false) {
+    await loadEnvFiles(rootDir, options.env);
+  }
+  const report = await buildDoctorReport({ rootDir });
+  console.log(formatDoctorReport(report));
+  if (!report.ok) {
+    process.exitCode = 1;
   }
 }
 
@@ -255,12 +272,15 @@ function printHelp(): void {
     "",
     "Usage:",
     "  pnpm dwt list",
+    "  pnpm dwt doctor",
+    "  pnpm dwt setup --check",
     "  pnpm dwt validate [caseId|file]",
     "  pnpm dwt preflight <caseId|file> [--env=local|dev|test|sit] [--no-env-file]",
     "  pnpm dwt plan <caseId|file> [--env=local|dev|test|sit] [--no-env-file]",
     "  pnpm dwt run <caseId|file> [--env=local|dev|test|sit] [--headless|--headed] [--no-env-file]",
     "",
     "Examples:",
+    "  pnpm dwt doctor",
     "  pnpm dwt validate admin_profile_update",
     "  pnpm dwt preflight login_user --env=sit",
     "  pnpm dwt run login_user --env=sit --headless"

@@ -35,6 +35,9 @@ export interface RunHistoryItem {
     html: string;
     json: string;
     logs: string;
+    screenshots?: string;
+    traces?: string;
+    videos?: string;
   };
   developerSummary?: DeveloperHandoffSummary;
 }
@@ -82,7 +85,7 @@ export class ReportService {
   }
 
   async artifactSummaries(): Promise<ArtifactSummary[]> {
-    const kinds: ArtifactKind[] = ["logs", "screenshots", "reports", "traces", "ai-reports"];
+    const kinds: ArtifactKind[] = ["logs", "screenshots", "reports", "traces", "videos", "ai-reports"];
     return Promise.all(kinds.map((kind) => this.artifactSummary(kind)));
   }
 
@@ -137,6 +140,7 @@ export class ReportService {
       path.resolve(this.artifactDir("logs"), `${safeRunId}.log`),
       path.resolve(this.artifactDir("screenshots"), safeRunId),
       path.resolve(this.artifactDir("traces"), safeRunId),
+      path.resolve(this.artifactDir("videos"), safeRunId),
       path.resolve(this.artifactDir("ai-reports"), safeRunId)
     ];
     const files: string[] = [];
@@ -193,7 +197,8 @@ export class ReportService {
         html: `/reports/${report.runId}.html`,
         logs: `/api/test-runs/${report.runId}/logs`,
         screenshots: `/screenshots/${report.runId}`,
-        traces: `/traces/${report.runId}`
+        traces: `/traces/${report.runId}`,
+        videos: `/videos/${report.runId}`
       }
     };
   }

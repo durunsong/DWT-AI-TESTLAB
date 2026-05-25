@@ -1,5 +1,6 @@
 case_id: approval_template
 case_name: 审核流程模板
+case_type: uncategorized
 mode: hybrid
 defaults:
   step_timeout_ms: 20000

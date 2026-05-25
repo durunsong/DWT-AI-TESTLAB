@@ -1,6 +1,7 @@
 export interface CaseItem {
   caseId: string;
   caseName: string;
+  caseType: string;
   description?: string;
   mode: string;
   total: number;
@@ -18,6 +19,7 @@ export type CreateCaseTemplate = "user_login" | "admin_login" | "user_admin_kyc"
 export interface CreateCaseInput {
   caseId: string;
   caseName: string;
+  caseType?: string;
   description?: string;
   template: CreateCaseTemplate;
 }

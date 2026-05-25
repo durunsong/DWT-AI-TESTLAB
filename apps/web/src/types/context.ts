@@ -29,6 +29,14 @@ export interface AppContextSummary {
   sources: AppAuthSourceSummary[];
 }
 
+export type AppAuthSourceOverview = Omit<AppAuthSourceSummary, "routes" | "enterpriseRoutes" | "approvalRoutes">;
+
+export interface AppContextOverview {
+  user: AppAuthSourceOverview;
+  admin: AppAuthSourceOverview;
+  sources: AppAuthSourceOverview[];
+}
+
 export interface AppContextSourceDetail {
   source: string;
   fileName: string;

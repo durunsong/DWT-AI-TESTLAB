@@ -6,11 +6,13 @@ export interface CaseSourceOption {
   label: string;
   value: string;
   description: string;
+  caseType: string;
 }
 
 export interface CaseSourceMeta {
   caseId: string;
   caseName: string;
+  caseType?: string;
   description?: string;
 }
 
@@ -22,7 +24,8 @@ export function buildCaseSourceOptions(cases: CaseItem[]): CaseSourceOption[] {
     .map((item) => ({
       label: item.caseName ? `${item.caseId} - ${item.caseName}` : item.caseId,
       value: item.caseId,
-      description: `${item.mode} / ${item.total} steps${item.file ? ` / ${item.file}` : ""}`
+      description: `${item.mode} / ${item.total} steps${item.file ? ` / ${item.file}` : ""}`,
+      caseType: item.caseType || "uncategorized"
     }));
 }
 
@@ -30,8 +33,9 @@ export function createCaseYamlFromSource(source: string, meta: CaseSourceMeta): 
   const lines = source.replace(/^\uFEFF/, "").split(/\r?\n/);
   let next = upsertYamlScalar(lines, "case_id", meta.caseId, 0);
   next = upsertYamlScalar(next, "case_name", meta.caseName, findYamlKeyIndex(next, "case_id") + 1);
+  next = upsertYamlScalar(next, "case_type", meta.caseType || "uncategorized", findYamlKeyIndex(next, "case_name") + 1);
   if (meta.description?.trim()) {
-    next = upsertYamlScalar(next, "description", meta.description.trim(), findYamlKeyIndex(next, "case_name") + 1);
+    next = upsertYamlScalar(next, "description", meta.description.trim(), findYamlKeyIndex(next, "case_type") + 1);
   }
   return `${next.join("\n").replace(/\n*$/, "")}\n`;
 }
@@ -47,10 +51,10 @@ function compareCaseSource(a: CaseItem, b: CaseItem): number {
   return a.caseId.localeCompare(b.caseId);
 }
 
-function upsertYamlScalar(lines: string[], key: "case_id" | "case_name" | "description", value: string, insertIndex: number): string[] {
+function upsertYamlScalar(lines: string[], key: "case_id" | "case_name" | "case_type" | "description", value: string, insertIndex: number): string[] {
   const next = [...lines];
   const index = findYamlKeyIndex(next, key);
-  const rendered = `${key}: ${key === "case_id" ? value : JSON.stringify(value)}`;
+  const rendered = `${key}: ${key === "case_id" || key === "case_type" ? value : JSON.stringify(value)}`;
   if (index >= 0) {
     next[index] = rendered;
     return next;

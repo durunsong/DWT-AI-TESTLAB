@@ -1,8 +1,12 @@
 import { request } from "./request";
-import type { AppAuthSourceSummary, AppContextSourceDetail, AppContextSummary, DbHealthResult } from "../types/context";
+import type { AppAuthSourceSummary, AppContextOverview, AppContextSourceDetail, AppContextSummary, DbHealthResult } from "../types/context";
 
 export function getAppContext(): Promise<AppContextSummary> {
   return request.get<unknown, AppContextSummary>("/app/context");
+}
+
+export function getAppContextOverview(): Promise<AppContextOverview> {
+  return request.get<unknown, AppContextOverview>("/app/context/overview");
 }
 
 export function parseAppContextSource(input: { source: string; fileName: string; content: string }): Promise<AppAuthSourceSummary> {

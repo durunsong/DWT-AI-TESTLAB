@@ -46,6 +46,53 @@ describe("ScenarioLoader compatibility", () => {
     assert.equal(result.data?.steps[2]?.phase, "afterActions");
   });
 
+  it("defaults old scenarios without case_type to uncategorized", () => {
+    const result = validateScenarioContent([
+      "case_id: old_case",
+      "case_name: Old Case",
+      "mode: web",
+      "sessions:",
+      "  - name: user",
+      "    login_url: \"https://example.test/login\"",
+      "locations:",
+      "  file: cases/location/login.user.yaml",
+      "steps:",
+      "  - step_id: open_page",
+      "    name: open page",
+      "    type: web_open",
+      "    session: user",
+      "    url: \"${session.login_url}\"",
+      ""
+    ].join("\n"));
+
+    assert.equal(result.valid, true);
+    assert.equal(result.data?.case_type, "uncategorized");
+  });
+
+  it("reads case_type from scenario yaml", () => {
+    const result = validateScenarioContent([
+      "case_id: typed_case",
+      "case_name: Typed Case",
+      "case_type: smoke",
+      "mode: web",
+      "sessions:",
+      "  - name: user",
+      "    login_url: \"https://example.test/login\"",
+      "locations:",
+      "  file: cases/location/login.user.yaml",
+      "steps:",
+      "  - step_id: open_page",
+      "    name: open page",
+      "    type: web_open",
+      "    session: user",
+      "    url: \"${session.login_url}\"",
+      ""
+    ].join("\n"));
+
+    assert.equal(result.valid, true);
+    assert.equal(result.data?.case_type, "smoke");
+  });
+
   it("expands shared steps while loading runnable scenarios", async () => {
     const rootDir = await tempWorkspace();
     await fs.mkdir(path.join(rootDir, "cases", "scenario"), { recursive: true });

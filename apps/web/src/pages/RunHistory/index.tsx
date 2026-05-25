@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { Button, Card, Checkbox, Col, Empty, Popconfirm, Row, Space, Statistic, Table, Tag, message } from "antd";
-import { ClearOutlined, DeleteOutlined, FileTextOutlined, ReloadOutlined } from "@ant-design/icons";
+import { useEffect, useMemo, useState } from "react";
+import { Button, Card, Checkbox, Col, Empty, Input, Popconfirm, Row, Select, Space, Statistic, Table, Tag, message } from "antd";
+import { ClearOutlined, DeleteOutlined, FileTextOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import { clearArtifacts, deleteRunHistory, getArtifactSummaries, listRunHistory } from "../../api/reports";
 import { PageHeader } from "../../components/PageHeader";
@@ -12,14 +12,23 @@ const artifactOptions: Array<{ label: string; value: ArtifactKind }> = [
   { label: "截图", value: "screenshots" },
   { label: "报告", value: "reports" },
   { label: "Trace", value: "traces" },
+  { label: "视频", value: "videos" },
   { label: "AI 报告", value: "ai-reports" }
+];
+
+const statusOptions: Array<{ label: string; value: RunHistoryItem["status"] }> = [
+  { label: "运行中", value: "running" },
+  { label: "成功", value: "passed" },
+  { label: "失败", value: "failed" }
 ];
 
 export default function RunHistory() {
   const [messageApi, contextHolder] = message.useMessage();
   const [history, setHistory] = useState<RunHistoryItem[]>([]);
   const [artifacts, setArtifacts] = useState<ArtifactSummary[]>([]);
-  const [selectedKinds, setSelectedKinds] = useState<ArtifactKind[]>(["logs", "screenshots", "reports", "traces", "ai-reports"]);
+  const [selectedKinds, setSelectedKinds] = useState<ArtifactKind[]>(["logs", "screenshots", "reports", "traces", "videos", "ai-reports"]);
+  const [historyKeyword, setHistoryKeyword] = useState("");
+  const [historyStatus, setHistoryStatus] = useState<RunHistoryItem["status"]>();
   const [loadingArtifacts, setLoadingArtifacts] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -88,6 +97,16 @@ export default function RunHistory() {
 
   const totalSize = artifacts.reduce((sum, item) => sum + item.sizeBytes, 0);
   const totalCount = artifacts.reduce((sum, item) => sum + item.count, 0);
+  const filteredHistory = useMemo(() => {
+    const keyword = historyKeyword.trim().toLowerCase();
+    return history.filter((item) => {
+      const matchedKeyword = keyword
+        ? [item.runId, item.caseName, item.caseId].some((value) => value?.toLowerCase().includes(keyword))
+        : true;
+      const matchedStatus = historyStatus ? item.status === historyStatus : true;
+      return matchedKeyword && matchedStatus;
+    });
+  }, [history, historyKeyword, historyStatus]);
 
   return (
     <div className="flex min-h-full flex-col gap-2.5">
@@ -155,11 +174,11 @@ export default function RunHistory() {
             </Popconfirm>
             <Popconfirm
               title="清理全部运行产物"
-              description="将清空 logs、screenshots、reports、traces 和 AI 报告。历史报告入口也会被清空。"
+              description="将清空 logs、screenshots、reports、traces、videos 和 AI 报告。历史报告入口也会被清空。"
               okText="全部清理"
               cancelText="取消"
               okButtonProps={{ danger: true, loading: clearing }}
-              onConfirm={() => handleClearArtifacts(["logs", "screenshots", "reports", "traces", "ai-reports"])}
+              onConfirm={() => handleClearArtifacts(["logs", "screenshots", "reports", "traces", "videos", "ai-reports"])}
             >
               <Button danger type="primary" icon={<ClearOutlined />} loading={clearing}>
                 全部清理
@@ -168,12 +187,37 @@ export default function RunHistory() {
           </Space>
         </div>
       </Card>
-      <Card title="历史测试记录">
+      <Card
+        className="[&_.ant-card-head-title]:!overflow-visible [&_.ant-card-head-title]:!whitespace-normal"
+        title={
+          <div className="run-history__titlebar flex flex-wrap items-center gap-4">
+            <span className="shrink-0">历史测试记录</span>
+            <div className="run-history__title-filters flex flex-wrap items-center gap-3">
+              <Input
+                allowClear
+                prefix={<SearchOutlined />}
+                placeholder="搜索 runId / 用例"
+                value={historyKeyword}
+                onChange={(event) => setHistoryKeyword(event.target.value)}
+                className="!w-[300px] !flex-none"
+              />
+              <Select
+                allowClear
+                placeholder="筛选状态"
+                value={historyStatus}
+                options={statusOptions}
+                onChange={setHistoryStatus}
+                className="!w-[140px] !flex-none"
+              />
+            </div>
+          </div>
+        }
+      >
         <Table<RunHistoryItem>
           rowKey="runId"
           loading={loadingHistory}
-          dataSource={history}
-          locale={{ emptyText: <Empty description="暂无历史测试记录" /> }}
+          dataSource={filteredHistory}
+          locale={{ emptyText: <Empty description={history.length ? "暂无匹配的历史测试记录" : "暂无历史测试记录"} /> }}
           pagination={{ pageSize: 8, showSizeChanger: false }}
           scroll={{ x: 1280 }}
           columns={[
@@ -212,7 +256,7 @@ export default function RunHistory() {
                   </Link>
                   <Popconfirm
                     title="删除历史记录"
-                    description={`删除 ${record.runId} 对应的报告、日志、截图、trace 和 AI 报告？`}
+                    description={`删除 ${record.runId} 对应的报告、日志、截图、trace、视频和 AI 报告？`}
                     okText="删除"
                     cancelText="取消"
                     okButtonProps={{ danger: true, loading: deletingRunId === record.runId }}
@@ -238,6 +282,7 @@ function artifactLabel(kind: ArtifactKind): string {
     screenshots: "截图",
     reports: "报告",
     traces: "Trace",
+    videos: "视频",
     "ai-reports": "AI 报告"
   };
   return labels[kind];

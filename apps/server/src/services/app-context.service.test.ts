@@ -57,3 +57,22 @@ test("supports custom route source keys beyond user and admin", async () => {
   const afterDelete = await service.deleteSource("operator");
   assert.equal(afterDelete.sources.some((source) => source.source === "operator"), false);
 });
+
+test("builds lightweight context overview without full route arrays", async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "app-context-overview-"));
+  const service = new AppContextService(rootDir);
+
+  await service.saveSource({
+    source: "user",
+    fileName: "user-routes.json",
+    content: JSON.stringify({ routes: [{ path: "/account" }, { path: "/enterprise/auth" }] })
+  });
+
+  const overview = await service.getContextOverview();
+
+  assert.equal(overview.user.routeCount, 2);
+  assert.equal("routes" in overview.user, false);
+  assert.equal("enterpriseRoutes" in overview.user, false);
+  assert.equal("approvalRoutes" in overview.user, false);
+  assert.equal(overview.sources[0]?.source, "user");
+});

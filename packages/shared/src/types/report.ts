@@ -49,6 +49,7 @@ export interface RunReport {
     log?: string;
     screenshotsDir?: string;
     tracesDir?: string;
+    videosDir?: string;
   };
   failureSummary?: string;
   developerSummary?: DeveloperHandoffSummary;

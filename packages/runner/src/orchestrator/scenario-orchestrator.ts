@@ -61,6 +61,7 @@ export class ScenarioOrchestrator {
       headless: process.env.HEADLESS === "true",
       slowMo: Number(process.env.SLOW_MO ?? 100),
       tracesDir: artifacts.tracesDir,
+      videosDir: artifacts.videosDir,
       defaultViewport: this.platformConfig.browser.defaultViewport
     });
     const visual = new VisualExecutor(process.env.VISUAL_MODE === "true" || process.env.HEADLESS !== "true");
@@ -158,7 +159,7 @@ export class ScenarioOrchestrator {
           await sessionManager.saveTrace(session as never, runId).catch(() => undefined);
         }
       }
-      await sessionManager.closeAll();
+      await sessionManager.closeAll({ keepVideos: process.env.VIDEO === "on" || steps.some((step) => step.status === "failed") });
     }
 
     const endedAt = new Date().toISOString();

@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import type { ScenarioSession, SessionName } from "@ai-e2e/shared";
@@ -17,6 +18,7 @@ export class SessionManager {
       headless: boolean;
       slowMo: number;
       tracesDir: string;
+      videosDir: string;
       defaultViewport: {
         width: number;
         height: number;
@@ -31,7 +33,7 @@ export class SessionManager {
       : await chromium.launch({
         headless: this.options.headless,
         slowMo: this.options.slowMo,
-        args: this.options.headless ? [] : ["--start-maximized"]
+        args: this.options.headless ? [] : ["--start-maximized", "--start-fullscreen"]
       });
     for (const session of sessions) {
       this.sessions.set(session.name, { config: session });
@@ -97,9 +99,12 @@ export class SessionManager {
     return tracePath;
   }
 
-  async closeAll(): Promise<void> {
+  async closeAll(options: { keepVideos?: boolean } = {}): Promise<void> {
     for (const managed of this.sessions.values()) {
       await managed.context?.close().catch(() => undefined);
+    }
+    if (this.videoMode() === "retain-on-failure" && !options.keepVideos) {
+      await fs.rm(this.options.videosDir, { recursive: true, force: true }).catch(() => undefined);
     }
     this.sessions.clear();
     await this.browser?.close().catch(() => undefined);
@@ -116,10 +121,16 @@ export class SessionManager {
     const height = Number(process.env.BROWSER_VIEWPORT_HEIGHT ?? this.options.defaultViewport.height);
     const context = await this.browser.newContext({
       viewport: this.options.headless ? { width, height } : null,
-      screen: { width, height }
+      ...(this.options.headless ? { screen: { width, height } } : {}),
+      ...(this.videoMode() === "off" ? {} : { recordVideo: { dir: this.options.videosDir, size: { width, height } } })
     });
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
     const page = await context.newPage();
     this.sessions.set(config.name, { config, context, page });
+  }
+
+  private videoMode(): "off" | "on" | "retain-on-failure" {
+    const value = process.env.VIDEO;
+    return value === "off" || value === "on" || value === "retain-on-failure" ? value : "retain-on-failure";
   }
 }

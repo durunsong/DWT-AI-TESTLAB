@@ -30,7 +30,7 @@ export function buildScreenshotAnalysisMessages(input: ScreenshotAnalysisInput):
       content: [
         `你是 ${appBrandName()} 自动化测试的视觉诊断助手。`,
         "根据失败截图判断页面当前状态、自动化失败原因、下一步应该点击或输入的位置。",
-        "只输出简洁的中文分析，不要输出账号、密码、token、cookie 等敏感信息。"
+        "只输出简洁的中文分析。账号类测试入参可用于比对，但不要输出密码、token、cookie 等敏感信息。"
       ].join("\n")
     },
     {
@@ -76,7 +76,8 @@ export function buildFailureAnalysisMessages(input: FailureAnalysisInput): AiCha
     "分析要求：",
     "- 如果 failedStep.data.diagnostics.recentActionDiagnostics 存在，请优先作为动作诊断依据；input_value.matched=false 通常表示页面实际值和用例期望值不一致，可能是人工干预、页面异步覆盖或输入未生效。",
     "- 如果接口诊断里包含 requestPostData/requestJson，请结合接口请求参数、HTTP 状态、业务码和响应内容判断是前端提交参数问题、后端业务失败还是测试数据问题。",
-    "- 对账号、密码、token、cookie 等敏感信息只描述是否一致、是否为空、长度等摘要，不要输出原文。",
+    "- 账号类测试入参可明文比对；如果账号在输入后、点击前或请求参数中发生变化，优先判断为测试执行/人工干预/自动化输入问题，不要直接归因为后端。",
+    "- 密码、token、cookie、密钥等敏感信息只描述是否一致、是否为空、长度等摘要，不要输出原文。",
     "",
     `runId: ${input.runId}`,
     `caseId: ${input.caseId}`,
@@ -109,8 +110,8 @@ export function buildFailureAnalysisMessages(input: FailureAnalysisInput): AiCha
         `你是 ${appBrandName()} 自动化测试失败诊断助手。`,
         "你需要结合日志、接口响应、用例 YAML、定位文件和失败截图判断根因。",
         "你需要重点阅读动作诊断和接口请求参数，识别人工干预、输入值被覆盖、请求参数不符合预期等异常。",
-        "优先指出真实业务/后端错误，其次指出自动化等待、定位、断言或用例生成问题。",
-        "不要输出账号、密码、token、cookie 等敏感信息。"
+        "账号类测试入参可明文比对；密码、token、cookie、密钥仍必须隐藏或只做摘要。",
+        "先判断是否存在测试输入、人工干预或测试数据问题，再判断真实业务/后端错误。"
       ].join("\n")
     },
     {

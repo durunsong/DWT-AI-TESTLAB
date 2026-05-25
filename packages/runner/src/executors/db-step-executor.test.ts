@@ -95,6 +95,7 @@ function state(variables: Record<string, string> = {}): RuntimeContextState {
     scenario: {
       case_id: "db_case",
       case_name: "DB 用例",
+      case_type: "uncategorized",
       mode: "hybrid",
       sessions: [],
       locations: { file: "cases/location/login.user.yaml" },

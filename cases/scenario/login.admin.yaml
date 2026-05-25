@@ -1,6 +1,7 @@
-case_id: login_admin
-case_name: admin 登录流程
-description: 打开 admin 登录页，输入环境变量中的账号密码并提交。
+case_id: "login_admin"
+case_name: "admin 登录流程"
+case_type: "admin-mian"
+description: "打开 admin 登录页，输入环境变量中的账号密码并提交。"
 mode: web
 defaults:
   step_timeout_ms: 20000

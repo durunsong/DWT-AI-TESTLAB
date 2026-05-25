@@ -1,5 +1,6 @@
 case_id: login_template
 case_name: 登录流程模板
+case_type: uncategorized
 mode: web
 defaults:
   step_timeout_ms: 20000

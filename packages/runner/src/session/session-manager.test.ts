@@ -10,6 +10,7 @@ test("initialize records sessions without opening pages until they are requested
     headless: true,
     slowMo: 0,
     tracesDir: "traces",
+    videosDir: "videos",
     defaultViewport: { width: 1920, height: 1080 },
     browserLauncher: async () => browser as unknown as Browser
   });
@@ -36,6 +37,7 @@ test("newPage replaces the managed page without leaving the previous page open",
     headless: true,
     slowMo: 0,
     tracesDir: "traces",
+    videosDir: "videos",
     defaultViewport: { width: 1920, height: 1080 },
     browserLauncher: async () => browser as unknown as Browser
   });
@@ -52,12 +54,89 @@ test("newPage replaces the managed page without leaving the previous page open",
   await manager.closeAll();
 });
 
+test("records video into the configured directory when video mode is enabled", async () => {
+  const previous = process.env.VIDEO;
+  process.env.VIDEO = "on";
+  const browser = new FakeBrowser();
+  const manager = new SessionManager({
+    headless: true,
+    slowMo: 0,
+    tracesDir: "traces",
+    videosDir: "videos/run_a",
+    defaultViewport: { width: 1920, height: 1080 },
+    browserLauncher: async () => browser as unknown as Browser
+  });
+
+  try {
+    await manager.initialize([{ name: "user", login_url: "http://user/login" }]);
+    await manager.getPage("user");
+
+    assert.deepEqual(browser.contexts[0]?.options.recordVideo, { dir: "videos/run_a", size: { width: 1920, height: 1080 } });
+  } finally {
+    if (previous === undefined) {
+      delete process.env.VIDEO;
+    } else {
+      process.env.VIDEO = previous;
+    }
+    await manager.closeAll();
+  }
+});
+
+test("uses the real fullscreen window viewport for headed browser runs", async () => {
+  const browser = new FakeBrowser();
+  const manager = new SessionManager({
+    headless: false,
+    slowMo: 0,
+    tracesDir: "traces",
+    videosDir: "videos/run_a",
+    defaultViewport: { width: 1280, height: 720 },
+    browserLauncher: async () => browser as unknown as Browser
+  });
+
+  await manager.initialize([{ name: "user", login_url: "http://user/login" }]);
+  await manager.getPage("user");
+
+  assert.equal(browser.contexts[0]?.options.viewport, null);
+  assert.equal(browser.contexts[0]?.options.screen, undefined);
+  assert.deepEqual(browser.contexts[0]?.options.recordVideo, { dir: "videos/run_a", size: { width: 1280, height: 720 } });
+
+  await manager.closeAll();
+});
+
+test("does not record video when video mode is off", async () => {
+  const previous = process.env.VIDEO;
+  process.env.VIDEO = "off";
+  const browser = new FakeBrowser();
+  const manager = new SessionManager({
+    headless: true,
+    slowMo: 0,
+    tracesDir: "traces",
+    videosDir: "videos/run_a",
+    defaultViewport: { width: 1920, height: 1080 },
+    browserLauncher: async () => browser as unknown as Browser
+  });
+
+  try {
+    await manager.initialize([{ name: "user", login_url: "http://user/login" }]);
+    await manager.getPage("user");
+
+    assert.equal(browser.contexts[0]?.options.recordVideo, undefined);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.VIDEO;
+    } else {
+      process.env.VIDEO = previous;
+    }
+    await manager.closeAll();
+  }
+});
+
 class FakeBrowser {
   readonly contexts: FakeBrowserContext[] = [];
   closed = false;
 
-  async newContext(): Promise<FakeBrowserContext> {
-    const context = new FakeBrowserContext();
+  async newContext(options: Record<string, unknown> = {}): Promise<FakeBrowserContext> {
+    const context = new FakeBrowserContext(options);
     this.contexts.push(context);
     return context;
   }
@@ -74,6 +153,8 @@ class FakeBrowserContext {
     stop: async () => undefined
   };
   closed = false;
+
+  constructor(readonly options: Record<string, unknown>) {}
 
   async newPage(): Promise<FakePage> {
     const page = new FakePage();

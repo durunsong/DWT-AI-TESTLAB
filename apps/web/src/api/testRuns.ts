@@ -1,9 +1,17 @@
 import { request } from "./request";
 import { apiUrl } from "./base-url";
-import type { CreateTestRunParams, CreateTestRunResponse, TestRunSummary } from "../types/run";
+import type { BatchTestRunSummary, CreateBatchTestRunParams, CreateBatchTestRunResponse, CreateTestRunParams, CreateTestRunResponse, TestRunSummary } from "../types/run";
 
 export function createTestRun(data: CreateTestRunParams): Promise<CreateTestRunResponse> {
   return request.post<unknown, CreateTestRunResponse>("/test-runs", data);
+}
+
+export function createBatchTestRun(data: CreateBatchTestRunParams): Promise<CreateBatchTestRunResponse> {
+  return request.post<unknown, CreateBatchTestRunResponse>("/test-runs/batch", data);
+}
+
+export function getBatchTestRun(batchId: string): Promise<BatchTestRunSummary | null> {
+  return request.get<unknown, BatchTestRunSummary | null>(`/test-runs/batch/${batchId}`);
 }
 
 export function getTestRun(runId: string): Promise<TestRunSummary | null> {

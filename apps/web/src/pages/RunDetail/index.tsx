@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Card, Col, Empty, Modal, Row, Space, Table, Tag, Tooltip, Typography, message } from "antd";
-import { CopyOutlined, RobotOutlined } from "@ant-design/icons";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Card, Col, Empty, Modal, Progress, Row, Space, Table, Tag, Tooltip, Typography, message } from "antd";
+import { CopyOutlined, ReloadOutlined, RobotOutlined } from "@ant-design/icons";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { analyzeScreenshot } from "../../api/ai";
 import { AiThinking } from "../../components/AiThinking";
-import { eventSourceUrl, getTestRun, getTestRunLogs } from "../../api/testRuns";
+import { createBatchTestRun, createTestRun, eventSourceUrl, getBatchTestRun, getTestRun, getTestRunLogs } from "../../api/testRuns";
 import { LogTerminal } from "../../components/LogTerminal";
 import { MarkdownViewer } from "../../components/MarkdownViewer";
 import { PageHeader } from "../../components/PageHeader";
@@ -14,9 +14,11 @@ import { StepTimeline } from "../../components/StepTimeline";
 import { TypewriterMarkdownViewer } from "../../components/TypewriterMarkdownViewer";
 import { SCREENSHOT_PREVIEW_MAX_HEIGHT_CLASS, SCREENSHOT_PREVIEW_MODAL_WIDTH } from "../../components/image-preview";
 import { useRunStore } from "../../stores/useRunStore";
-import type { StepResult, TestRunEvent } from "../../types/run";
+import type { BatchTestRunSummary, StepResult, TestRunEvent } from "../../types/run";
 import { toScreenshotUrl } from "../../utils/artifact-url";
 import { formatDuration, formatTime } from "../../utils/format";
+import { buildRerunCaseRequest, canRerunCase } from "./rerun-case";
+import { createStepUpdateBatcher } from "./step-update-batcher";
 
 interface DetailPreview {
   title: string;
@@ -26,9 +28,10 @@ interface DetailPreview {
 
 export default function RunDetail() {
   const params = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [messageApi, contextHolder] = message.useMessage();
-  const { run, logs, setSummary, updateStep, setLogs, setRun, reset } = useRunStore();
+  const { run, logs, setSummary, updateStep, setLogs, setRun, reset, currentBatchId, setCurrentBatchId } = useRunStore();
   const runId = params.runId === "latest" ? "latest" : params.runId;
   const [aiAnalysis, setAiAnalysis] = useState("");
   const [aiLoadingStep, setAiLoadingStep] = useState("");
@@ -38,8 +41,17 @@ export default function RunDetail() {
   const [detailPreview, setDetailPreview] = useState<DetailPreview>();
   const [runLoadError, setRunLoadError] = useState("");
   const [latestMissing, setLatestMissing] = useState(false);
-  const pendingStepRef = useRef<StepResult | undefined>(undefined);
-  const stepUpdateFrameRef = useRef<number | null>(null);
+  const [rerunLoading, setRerunLoading] = useState(false);
+  const [batchRerunLoading, setBatchRerunLoading] = useState(false);
+  const [batchSummary, setBatchSummary] = useState<BatchTestRunSummary>();
+  const queryBatchId = searchParams.get("batchId") ?? "";
+  const batchId = params.runId === "latest" ? queryBatchId || currentBatchId : "";
+
+  useEffect(() => {
+    if (queryBatchId && queryBatchId !== currentBatchId) {
+      setCurrentBatchId(queryBatchId);
+    }
+  }, [currentBatchId, queryBatchId, setCurrentBatchId]);
 
   useEffect(() => {
     if (!runId) return;
@@ -88,46 +100,79 @@ export default function RunDetail() {
   useEffect(() => {
     if (!runId || run?.status !== "running") return;
     const source = new EventSource(eventSourceUrl(runId));
-    const flushStepUpdate = () => {
-      stepUpdateFrameRef.current = null;
-      if (pendingStepRef.current) {
-        updateStep(pendingStepRef.current);
-        pendingStepRef.current = undefined;
-      }
-    };
+    const stepUpdateBatcher = createStepUpdateBatcher({
+      schedule: (callback) => window.requestAnimationFrame(callback),
+      cancel: (frame) => window.cancelAnimationFrame(frame),
+      onStep: updateStep
+    });
     source.addEventListener("step_updated", (event) => {
       const payload = JSON.parse((event as MessageEvent).data) as TestRunEvent;
       if (payload.step) {
-        pendingStepRef.current = payload.step;
-        if (!stepUpdateFrameRef.current) {
-          stepUpdateFrameRef.current = window.requestAnimationFrame(flushStepUpdate);
-        }
+        stepUpdateBatcher.enqueue(payload.step);
       }
     });
     source.addEventListener("run_finished", (event) => {
       const payload = JSON.parse((event as MessageEvent).data) as TestRunEvent;
-      if (stepUpdateFrameRef.current) {
-        window.cancelAnimationFrame(stepUpdateFrameRef.current);
-        stepUpdateFrameRef.current = null;
-      }
-      if (pendingStepRef.current) {
-        updateStep(pendingStepRef.current);
-        pendingStepRef.current = undefined;
-      }
+      stepUpdateBatcher.flush();
       setRun({ status: payload.status === "failed" ? "failed" : "passed" });
       getTestRun(runId).then((nextRun) => nextRun && setSummary(nextRun)).catch(() => undefined);
       getTestRunLogs(runId).then(setLogs).catch(() => undefined);
       source.close();
     });
     return () => {
-      if (stepUpdateFrameRef.current) {
-        window.cancelAnimationFrame(stepUpdateFrameRef.current);
-        stepUpdateFrameRef.current = null;
-      }
-      pendingStepRef.current = undefined;
+      stepUpdateBatcher.cancel();
       source.close();
     };
   }, [run?.status, runId, setLogs, setRun, setSummary, updateStep]);
+
+  useEffect(() => {
+    if (!batchId) {
+      setBatchSummary(undefined);
+      return;
+    }
+    let canceled = false;
+    let timer: number | undefined;
+
+    async function pollBatch() {
+      try {
+        const nextBatch = await getBatchTestRun(batchId);
+        if (canceled) return;
+        if (!nextBatch) {
+          setBatchSummary(undefined);
+          if (batchId === currentBatchId) {
+            setCurrentBatchId("");
+          }
+          return;
+        }
+        setBatchSummary(nextBatch);
+
+        const nextRun = await getTestRun("latest").catch(() => null);
+        if (!canceled && nextRun) {
+          setSummary(nextRun);
+          const nextLogs = await getTestRunLogs(nextRun.runId).catch(() => "");
+          if (!canceled) {
+            setLogs(nextLogs);
+          }
+        }
+
+        if (!canceled && nextBatch.status === "running") {
+          timer = window.setTimeout(pollBatch, 1200);
+        }
+      } catch (error) {
+        if (!canceled) {
+          messageApi.error(error instanceof Error ? error.message : String(error));
+        }
+      }
+    }
+
+    void pollBatch();
+    return () => {
+      canceled = true;
+      if (timer) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [batchId, messageApi, setLogs, setSummary]);
 
   const data = useMemo(() => run?.steps ?? [], [run?.steps]);
   const failureAnalysisStep = useMemo(() => data.find((step) => step.status === "failed" && step.aiAnalysis), [data]);
@@ -157,7 +202,47 @@ export default function RunDetail() {
     setDetailPreview({ title, content, danger });
   }
 
-  if (!runId || (params.runId === "latest" && latestMissing)) {
+  async function handleRerunCase() {
+    if (!canRerunCase(run)) return;
+    setRerunLoading(true);
+    try {
+      const created = await createTestRun(buildRerunCaseRequest(run));
+      const nextRun = await getTestRun(created.runId);
+      if (nextRun) {
+        setSummary(nextRun);
+      } else {
+        setRun({ runId: created.runId, caseId: run.caseId, status: created.status });
+      }
+      setLogs("");
+      setRunLoadError("");
+      navigate(`/runs/${created.runId}`);
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRerunLoading(false);
+    }
+  }
+
+  async function handleRerunFailedBatch() {
+    const failedCaseIds = batchSummary?.items
+      .filter((item) => item.status === "failed")
+      .map((item) => item.caseId) ?? [];
+    if (!batchSummary || !failedCaseIds.length) return;
+
+    setBatchRerunLoading(true);
+    try {
+      const created = await createBatchTestRun({ caseIds: failedCaseIds, env: batchSummary.env });
+      setCurrentBatchId(created.batchId);
+      setBatchSummary(undefined);
+      navigate(`/runs/latest?batchId=${encodeURIComponent(created.batchId)}`);
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBatchRerunLoading(false);
+    }
+  }
+
+  if (!runId || (params.runId === "latest" && latestMissing && !batchId)) {
     return (
       <div className="flex flex-col gap-2.5">
         {contextHolder}
@@ -186,6 +271,11 @@ export default function RunDetail() {
         description={runId}
         extra={
           <Space>
+            {canRerunCase(run) && !batchSummary ? (
+              <Button type="primary" icon={<ReloadOutlined />} loading={rerunLoading} onClick={() => void handleRerunCase()}>
+                重新执行用例
+              </Button>
+            ) : null}
             <Button onClick={() => navigate(`/reports/${runId}`)}>查看报告</Button>
             <Link to="/cases">返回用例</Link>
           </Space>
@@ -212,6 +302,7 @@ export default function RunDetail() {
       <Row gutter={[10, 10]} className="min-h-0 flex-none overflow-visible pb-2.5">
         <Col xs={24} xl={15} xxl={16} className="min-h-0 overflow-visible pr-0 xl:pr-1">
           <Space orientation="vertical" size={10} className="w-full pb-1">
+            {batchSummary ? <BatchProgressCard batch={batchSummary} rerunFailedLoading={batchRerunLoading} onRerunFailed={() => void handleRerunFailedBatch()} /> : null}
             <RunStatusCard run={run} />
             {failureAnalysisStep ? (
               <Card
@@ -446,6 +537,83 @@ function renderDetailCell(props: { content: string; empty: boolean; danger?: boo
       </Typography.Text>
       <span className="shrink-0 text-blue-600">详情</span>
     </button>
+  );
+}
+
+function BatchProgressCard(props: { batch: BatchTestRunSummary; rerunFailedLoading?: boolean; onRerunFailed?: () => void }) {
+  const { batch } = props;
+  const completed = batch.passed + batch.failed;
+  const failedCount = batch.items.filter((item) => item.status === "failed").length;
+  const percent = batch.total ? Math.round((completed / batch.total) * 100) : 0;
+  const runningIndex = batch.items.findIndex((item) => item.status === "running");
+  const currentItem = runningIndex >= 0 ? batch.items[runningIndex] : batch.items.find((item) => item.status === "pending");
+  const currentText = currentItem
+    ? `${Math.max(runningIndex, 0) + 1}/${batch.total} ${currentItem.caseName || currentItem.caseId}`
+    : `${completed}/${batch.total}`;
+  const currentPercent = batch.total
+    ? batch.status === "running" && runningIndex >= 0
+      ? Math.round(((runningIndex + 1) / batch.total) * 100)
+      : Math.round((completed / batch.total) * 100)
+    : 0;
+
+  return (
+    <Card
+      title="批量执行进度"
+      extra={
+        <Space>
+          {batch.status !== "running" && failedCount ? (
+            <Button size="small" type="primary" danger loading={props.rerunFailedLoading} onClick={props.onRerunFailed}>
+              重跑失败用例({failedCount})
+            </Button>
+          ) : null}
+          <Tag color={batch.status === "running" ? "processing" : batch.status === "passed" ? "success" : "error"}>{batch.status}</Tag>
+        </Space>
+      }
+    >
+      <Space size={12} className="mb-3" wrap>
+        <Tag>批次 {batch.batchId}</Tag>
+        <Tag>总数 {batch.total}</Tag>
+        <Tag color="success">通过 {batch.passed}</Tag>
+        <Tag color="error">失败 {batch.failed}</Tag>
+        <Tag color="processing">运行中 {batch.running}</Tag>
+        <Tag>等待 {batch.pending}</Tag>
+      </Space>
+      <div className="mb-3">
+        <div className="mb-1 text-sm text-slate-600">总进度：{completed}/{batch.total}</div>
+        <Progress percent={percent} status={batch.failed ? "exception" : batch.status === "passed" ? "success" : "active"} />
+      </div>
+      <div className="mb-3">
+        <div className="mb-1 text-sm text-slate-600">当前用例：{currentText}</div>
+        <Progress percent={currentPercent} />
+      </div>
+      <Table
+        size="small"
+        rowKey="caseId"
+        pagination={false}
+        dataSource={batch.items}
+        columns={[
+          { title: "用例", dataIndex: "caseName", render: (value, record) => `${record.caseId} - ${value}` },
+          { title: "类型", dataIndex: "caseType", width: 120, render: (value) => <Tag>{value}</Tag> },
+          {
+            title: "状态",
+            dataIndex: "status",
+            width: 100,
+            render: (value) => <Tag color={statusColor(value)}>{statusText(value)}</Tag>
+          },
+          {
+            title: "报告入口",
+            width: 220,
+            render: (_, record) => (
+              <Space size={6}>
+                {record.runId ? <Link to={`/runs/${record.runId}`}>详情</Link> : <span className="text-slate-400">等待</span>}
+                {record.runId ? <Link to={`/reports/${record.runId}`}>报告</Link> : null}
+                {record.reportLinks?.logs ? <Button size="small" type="link" href={record.reportLinks.logs} target="_blank">日志</Button> : null}
+              </Space>
+            )
+          }
+        ]}
+      />
+    </Card>
   );
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type Key, startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Card, Checkbox, Form, Input, Modal, Popconfirm, Radio, Select, Space, Table, Tabs, Tag, Tooltip, Typography, Upload, message } from "antd";
 import {
   ArrowDownOutlined,
@@ -20,7 +20,8 @@ import type { RcFile } from "antd/es/upload";
 import { useNavigate } from "react-router-dom";
 import { generateMaterialCaseDraft } from "../../api/ai";
 import { deleteCase, getCase, importCaseYaml, listCases, listSharedAbilities } from "../../api/cases";
-import { createTestRun } from "../../api/testRuns";
+import { listCaseTypes } from "../../api/settings";
+import { createBatchTestRun, createTestRun } from "../../api/testRuns";
 import { EnvSelector } from "../../components/EnvSelector";
 import { IMAGE_PREVIEW_MAX_HEIGHT_CLASS, IMAGE_PREVIEW_MODAL_WIDTH } from "../../components/image-preview";
 import { PageHeader } from "../../components/PageHeader";
@@ -28,11 +29,14 @@ import { useCaseStore } from "../../stores/useCaseStore";
 import { useRunStore } from "../../stores/useRunStore";
 import { useSettingStore } from "../../stores/useSettingStore";
 import type { CaseItem, CreateCaseTemplate, SharedAbility } from "../../types/case";
+import type { CaseTypeConfig } from "../../types/settings";
 import { cn } from "../../utils/cn";
 import type { ScenarioMode, ScenarioStep } from "@ai-e2e/shared";
 import { hasFileDrag } from "../CaseEditor/drag-upload";
 import { buildCaseSourceOptions, createCaseYamlFromSource } from "./case-source";
+import { buildBatchRunRequest, filterCasesByType } from "./case-batch";
 import { createCaseListCopyMeta, type CaseListCopyTarget } from "./case-list-copy";
+import { caseListRenderDelayMs, shouldRenderCreateCaseModal } from "./case-list-rendering";
 import { canAcceptCreateCaseMaterialDrop, createCaseMaterialDropCopy } from "./material-drop";
 import { buildSharedAbilityOptions, summarizeSelectedSharedAbilities } from "./shared-abilities";
 
@@ -40,6 +44,7 @@ interface CreateCaseFormValues {
   caseId: string;
   caseName: string;
   description?: string;
+  caseType: string;
   sourceCaseId: string;
   template: CreateCaseTemplate;
   requirement?: string;
@@ -216,10 +221,14 @@ export default function CaseList() {
   const [messageApi, contextHolder] = message.useMessage();
   const { cases, setCases } = useCaseStore();
   const { env, setEnv } = useSettingStore();
-  const { setRun } = useRunStore();
+  const { setRun, setCurrentBatchId } = useRunStore();
   const [form] = Form.useForm<CreateCaseFormValues>();
   const [loading, setLoading] = useState(false);
   const [runningCaseId, setRunningCaseId] = useState("");
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [selectedCaseIds, setSelectedCaseIds] = useState<Key[]>([]);
+  const [caseTypeFilter, setCaseTypeFilter] = useState("");
+  const [caseTypes, setCaseTypes] = useState<CaseTypeConfig[]>([{ key: "uncategorized", label: "未分类", enabled: true, sort: 0 }]);
   const [deletingCaseId, setDeletingCaseId] = useState("");
   const [deleteAttachmentsByCaseId, setDeleteAttachmentsByCaseId] = useState<Record<string, boolean>>({});
   const [createOpen, setCreateOpen] = useState(false);
@@ -232,23 +241,58 @@ export default function CaseList() {
   const [sharedAbilities, setSharedAbilities] = useState<SharedAbility[]>([]);
   const [sharedAbilitiesLoading, setSharedAbilitiesLoading] = useState(false);
   const caseSourceOptions = useMemo(() => buildCaseSourceOptions(cases), [cases]);
+  const visibleCases = useMemo(() => filterCasesByType(cases, caseTypeFilter), [cases, caseTypeFilter]);
+  const selectedRunnableCount = useMemo(
+    () => buildBatchRunRequest(cases, selectedCaseIds.map(String), env).caseIds.length,
+    [cases, selectedCaseIds, env]
+  );
+  const caseTypeOptions = useMemo(() => caseTypes.filter((item) => item.enabled).map((item) => ({ label: item.label, value: item.key })), [caseTypes]);
+  const caseTypeLabelByKey = useMemo(
+    () => new Map(caseTypes.map((item) => [item.key, item.label])),
+    [caseTypes]
+  );
   const sharedAbilityOptions = useMemo(() => buildSharedAbilityOptions(sharedAbilities), [sharedAbilities]);
   const materialDragDepthRef = useRef(0);
+  const casesRenderTimerRef = useRef<number | undefined>(undefined);
+  const caseTypesRenderTimerRef = useRef<number | undefined>(undefined);
   const materialDropCopy = materialDropActive ? createCaseMaterialDropCopy() : undefined;
 
   async function refresh() {
     setLoading(true);
     try {
-      setCases(await listCases());
+      const nextCases = await listCases();
+      window.clearTimeout(casesRenderTimerRef.current);
+      casesRenderTimerRef.current = window.setTimeout(() => {
+        startTransition(() => {
+          setCases(nextCases);
+          setLoading(false);
+        });
+      }, caseListRenderDelayMs);
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : String(error));
-    } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
     void refresh();
+    return () => {
+      window.clearTimeout(casesRenderTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    listCaseTypes()
+      .then((nextCaseTypes) => {
+        window.clearTimeout(caseTypesRenderTimerRef.current);
+        caseTypesRenderTimerRef.current = window.setTimeout(() => {
+          startTransition(() => setCaseTypes(nextCaseTypes));
+        }, caseListRenderDelayMs);
+      })
+      .catch(() => setCaseTypes([{ key: "uncategorized", label: "未分类", enabled: true, sort: 0 }]));
+    return () => {
+      window.clearTimeout(caseTypesRenderTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -348,6 +392,24 @@ export default function CaseList() {
     }
   }
 
+  async function runBatch(caseIds: string[]) {
+    const request = buildBatchRunRequest(cases, caseIds, env);
+    if (!request.caseIds.length) {
+      messageApi.warning("请选择至少一个可执行用例");
+      return;
+    }
+    setBatchRunning(true);
+    try {
+      const created = await createBatchTestRun(request);
+      setCurrentBatchId(created.batchId);
+      navigate(`/runs/latest?batchId=${encodeURIComponent(created.batchId)}`);
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBatchRunning(false);
+    }
+  }
+
   async function removeCase(caseId: string) {
     setDeletingCaseId(caseId);
     try {
@@ -375,6 +437,7 @@ export default function CaseList() {
     form.setFieldsValue({
       caseId: "",
       caseName: "",
+      caseType: caseTypeOptions[0]?.value ?? "uncategorized",
       description: "",
       sourceCaseId: defaultSourceCaseId,
       template: "user_login",
@@ -428,7 +491,7 @@ export default function CaseList() {
       files,
       sharedAbilities: summarizeSelectedSharedAbilities(sharedAbilities, values.sharedAbilityIds)
     });
-    const saved = await importCaseYaml({ content: result.content, caseId });
+    const saved = await importCaseYaml({ content: ensureCaseTypeInYaml(result.content, values.caseType), caseId });
     if (!saved.saved) {
       throw new Error(saved.validation?.issues?.map((item) => `${item.path}: ${item.message}`).join("; ") || "AI YAML 未通过校验");
     }
@@ -446,6 +509,7 @@ export default function CaseList() {
       content: createCaseYamlFromSource(source.content, {
         caseId,
         caseName: values.caseName,
+        caseType: values.caseType,
         description: values.description
       }),
       caseId
@@ -590,6 +654,22 @@ export default function CaseList() {
         extra={
           <>
             <EnvSelector value={env} onChange={setEnv} />
+            <Select
+              className="w-[180px]"
+              allowClear
+              placeholder="按类型筛选"
+              value={caseTypeFilter || undefined}
+              options={caseTypeOptions}
+              onChange={(value) => setCaseTypeFilter(value ?? "")}
+            />
+            <Button
+              icon={<PlayCircleOutlined />}
+              loading={batchRunning}
+              disabled={!selectedRunnableCount || Boolean(runningCaseId)}
+              onClick={() => void runBatch(selectedCaseIds.map(String))}
+            >
+              批量运行{selectedRunnableCount ? `(${selectedRunnableCount})` : ""}
+            </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
               新增用例
             </Button>
@@ -607,8 +687,14 @@ export default function CaseList() {
         <Table<CaseItem>
           rowKey="caseId"
           loading={loading}
-          dataSource={cases}
+          dataSource={visibleCases}
           pagination={false}
+          rowSelection={{
+            selectedRowKeys: selectedCaseIds,
+            preserveSelectedRowKeys: true,
+            getCheckboxProps: (record) => ({ disabled: record.valid === false }),
+            onChange: setSelectedCaseIds
+          }}
           rowClassName={() => "align-top"}
           tableLayout="fixed"
           scroll={{ x: 1430 }}
@@ -657,6 +743,15 @@ export default function CaseList() {
               render: (description: string) => (
                 <span className="block whitespace-normal break-words leading-6 text-slate-700">{description || "-"}</span>
               )
+            },
+            {
+              title: "类型",
+              dataIndex: "caseType",
+              width: 120,
+              render: (caseType: string) => {
+                const meta = caseTypes.find((item) => item.key === (caseType || "uncategorized"));
+                return <Tag color={meta?.enabled === false ? "default" : "blue"}>{meta?.label ?? caseType ?? "未分类"}</Tag>;
+              }
             },
             { title: "模式", dataIndex: "mode", width: 80, render: (mode) => <Tag>{mode}</Tag> },
             {
@@ -737,23 +832,23 @@ export default function CaseList() {
           ]}
         />
       </Card>
-      <Modal
-        title="新增用例"
-        open={createOpen}
-        width={860}
-        style={{ top: 20 }}
-        okText={createMode === "ai" ? "AI 生成并编辑" : "创建并编辑"}
-        cancelText="取消"
-        confirmLoading={creating}
-        destroyOnHidden
-        forceRender
-        mask={{ closable: !creating }}
-        styles={{ body: { maxHeight: "calc(100vh - 220px)", overflowY: "auto", paddingRight: 8, paddingBottom: 88 } }}
-        onOk={() => void handleCreateCase()}
-        onCancel={() => {
-          if (!creating) setCreateOpen(false);
-        }}
-      >
+      {shouldRenderCreateCaseModal(createOpen, creating) ? (
+        <Modal
+          title="新增用例"
+          open={createOpen}
+          width={860}
+          style={{ top: 20 }}
+          okText={createMode === "ai" ? "AI 生成并编辑" : "创建并编辑"}
+          cancelText="取消"
+          confirmLoading={creating}
+          destroyOnHidden
+          mask={{ closable: !creating }}
+          styles={{ body: { maxHeight: "calc(100vh - 220px)", overflowY: "auto", paddingRight: 8, paddingBottom: 88 } }}
+          onOk={() => void handleCreateCase()}
+          onCancel={() => {
+            if (!creating) setCreateOpen(false);
+          }}
+        >
         <Alert
           className="mb-2.5"
           type="info"
@@ -824,6 +919,13 @@ export default function CaseList() {
           >
             <Input placeholder="例如 user 登录流程 - SIT" allowClear />
           </Form.Item>
+          <Form.Item label="用例类型" name="caseType" rules={[{ required: true, message: "请选择用例类型" }]}>
+            <Select
+              placeholder="选择用例类型"
+              options={caseTypeOptions}
+              notFoundContent="请先到 Settings 维护用例类型"
+            />
+          </Form.Item>
           <Form.Item label="说明" name="description">
             <Input.TextArea rows={3} placeholder="简要说明这个用例覆盖的业务流程、前置条件或断言目标" showCount maxLength={180} />
           </Form.Item>
@@ -838,16 +940,22 @@ export default function CaseList() {
               allowClear
               placeholder="搜索 case_id、名称或文件路径"
               optionFilterProp="searchText"
-              options={caseSourceOptions.map((option) => ({
-                label: (
-                  <div className="grid min-w-0 gap-0.5 py-1">
-                    <span className="truncate font-medium">{option.label}</span>
-                    <span className="truncate text-xs text-slate-500">{option.description}</span>
-                  </div>
-                ),
-                value: option.value,
-                searchText: `${option.label} ${option.description}`
-              }))}
+              options={caseSourceOptions.map((option) => {
+                const caseTypeLabel = caseTypeLabelByKey.get(option.caseType) ?? option.caseType;
+                return {
+                  label: (
+                    <div className="grid min-w-0 gap-0.5 py-1">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate font-medium">{option.label}</span>
+                        <Tag className="m-0 shrink-0" color="blue">{caseTypeLabel}</Tag>
+                      </span>
+                      <span className="truncate text-xs text-slate-500">{option.description}</span>
+                    </div>
+                  ),
+                  value: option.value,
+                  searchText: `${option.label} ${option.description} ${caseTypeLabel} ${option.caseType}`
+                };
+              })}
               notFoundContent={cases.length ? "没有可用的有效用例" : "暂无用例"}
             />
           </Form.Item>
@@ -1060,8 +1168,9 @@ export default function CaseList() {
               </Form.Item>
             </div>
           ) : null}
-        </Form>
-      </Modal>
+          </Form>
+        </Modal>
+      ) : null}
       <Modal
         title={previewMaterial?.name ?? "图片预览"}
         open={Boolean(previewMaterial)}
@@ -1141,6 +1250,19 @@ function normalizeCaseName(value?: string): string {
   return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+function ensureCaseTypeInYaml(content: string, caseType: string): string {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const value = caseType || "uncategorized";
+  const existing = lines.findIndex((line) => /^case_type\s*:/.test(line));
+  if (existing >= 0) {
+    lines[existing] = `case_type: ${value}`;
+    return `${lines.join("\n").replace(/\n*$/, "")}\n`;
+  }
+  const caseNameIndex = lines.findIndex((line) => /^case_name\s*:/.test(line));
+  lines.splice(caseNameIndex >= 0 ? caseNameIndex + 1 : 0, 0, `case_type: ${value}`);
+  return `${lines.join("\n").replace(/\n*$/, "")}\n`;
+}
+
 function cloneTemplateSteps(template: CreateCaseTemplate): ScenarioStep[] {
   return templateDrafts[template].steps.map((step) => ({ ...step }));
 }
@@ -1151,6 +1273,7 @@ function buildTemplateCaseYaml(values: CreateCaseFormValues, caseId: string, ste
   return [
     `case_id: ${caseId}`,
     `case_name: ${quoteYaml(values.caseName)}`,
+    `case_type: ${values.caseType || "uncategorized"}`,
     `description: ${quoteYaml(description)}`,
     `mode: ${draft.mode}`,
     "sessions:",

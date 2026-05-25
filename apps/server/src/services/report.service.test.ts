@@ -9,7 +9,7 @@ import { ReportService } from "./report.service";
 
 test("deletes artifacts for one run history item", async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "dwt-report-delete-"));
-  for (const dir of ["reports", "logs", "screenshots/run_a", "screenshots/run_b", "traces/run_a", "traces/run_b", "ai-reports/run_a", "ai-reports/run_b"]) {
+  for (const dir of ["reports", "logs", "screenshots/run_a", "screenshots/run_b", "traces/run_a", "traces/run_b", "videos/run_a", "videos/run_b", "ai-reports/run_a", "ai-reports/run_b"]) {
     await fs.mkdir(path.join(rootDir, dir), { recursive: true });
   }
   await fs.writeFile(path.join(rootDir, "reports", "run_a.json"), "{}", "utf8");
@@ -19,6 +19,7 @@ test("deletes artifacts for one run history item", async () => {
   await fs.writeFile(path.join(rootDir, "logs", "run_b.log"), "log", "utf8");
   await fs.writeFile(path.join(rootDir, "screenshots", "run_a", "failed.png"), "png", "utf8");
   await fs.writeFile(path.join(rootDir, "traces", "run_a", "trace.zip"), "zip", "utf8");
+  await fs.writeFile(path.join(rootDir, "videos", "run_a", "video.webm"), "webm", "utf8");
   await fs.writeFile(path.join(rootDir, "ai-reports", "run_a", "index.json"), "{}", "utf8");
 
   const service = new ReportService(rootDir);
@@ -30,6 +31,7 @@ test("deletes artifacts for one run history item", async () => {
   await assert.rejects(() => fs.stat(path.join(rootDir, "logs", "run_a.log")));
   await assert.rejects(() => fs.stat(path.join(rootDir, "screenshots", "run_a")));
   await assert.rejects(() => fs.stat(path.join(rootDir, "traces", "run_a")));
+  await assert.rejects(() => fs.stat(path.join(rootDir, "videos", "run_a")));
   await assert.rejects(() => fs.stat(path.join(rootDir, "ai-reports", "run_a")));
   await assert.doesNotReject(() => fs.stat(path.join(rootDir, "reports", "run_b.json")));
   await assert.doesNotReject(() => fs.stat(path.join(rootDir, "logs", "run_b.log")));
@@ -108,7 +110,8 @@ test("uses configured artifact directories", async () => {
     logsDir: "runtime/logs",
     reportsDir: "runtime/reports",
     screenshotsDir: "runtime/screenshots",
-    tracesDir: "runtime/traces"
+    tracesDir: "runtime/traces",
+    videosDir: "runtime/videos"
   };
   await fs.mkdir(path.join(rootDir, artifactDirs.reportsDir), { recursive: true });
   await fs.mkdir(path.join(rootDir, artifactDirs.logsDir), { recursive: true });
@@ -146,7 +149,8 @@ test("lists run trace artifacts from configured artifact directory", async () =>
     logsDir: "logs",
     reportsDir: "reports",
     screenshotsDir: "screenshots",
-    tracesDir: "runtime/traces"
+    tracesDir: "runtime/traces",
+    videosDir: "videos"
   };
   await fs.mkdir(path.join(rootDir, artifactDirs.tracesDir, "001_trace_case"), { recursive: true });
   await fs.writeFile(path.join(rootDir, artifactDirs.tracesDir, "001_trace_case", "001_trace_case-admin.zip"), "zip", "utf8");
@@ -161,6 +165,32 @@ test("lists run trace artifacts from configured artifact directory", async () =>
       name: "001_trace_case-admin.zip",
       path: "/traces/001_trace_case/001_trace_case-admin.zip",
       sizeBytes: 3
+    }
+  ]);
+});
+
+test("lists run video artifacts from configured artifact directory", async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "dwt-report-videos-"));
+  const artifactDirs = {
+    logsDir: "logs",
+    reportsDir: "reports",
+    screenshotsDir: "screenshots",
+    tracesDir: "traces",
+    videosDir: "runtime/videos"
+  };
+  await fs.mkdir(path.join(rootDir, artifactDirs.videosDir, "001_video_case"), { recursive: true });
+  await fs.writeFile(path.join(rootDir, artifactDirs.videosDir, "001_video_case", "recording.webm"), "webm", "utf8");
+
+  const service = new ReportService(rootDir, {
+    ...defaultPlatformConfigForTest(),
+    artifacts: artifactDirs
+  });
+
+  assert.deepEqual(await service.listArtifactFiles("videos", "001_video_case"), [
+    {
+      name: "recording.webm",
+      path: "/videos/001_video_case/recording.webm",
+      sizeBytes: 4
     }
   ]);
 });
@@ -250,7 +280,7 @@ function defaultPlatformConfigForTest(): PlatformConfig {
       window: { title: "Test", width: 1440, height: 920, minWidth: 1280, minHeight: 760, menuBarVisible: true }
     },
     workspace: { directories: ["cases"] },
-    artifacts: { logsDir: "logs", reportsDir: "reports", screenshotsDir: "screenshots", tracesDir: "traces" },
+    artifacts: { logsDir: "logs", reportsDir: "reports", screenshotsDir: "screenshots", tracesDir: "traces", videosDir: "videos" },
     browser: { defaultViewport: { width: 1920, height: 1080 } },
     context: { defaultSources: ["user", "admin"], routeGroups: { enterpriseKeywords: [], approvalKeywords: [] } },
     uploads: {
@@ -260,6 +290,7 @@ function defaultPlatformConfigForTest(): PlatformConfig {
       caseAttachmentBaseDir: "uploads/cases",
       materialSourceMaxChars: 18000,
       materialLinkMaxChars: 24000
-    }
+    },
+    caseTypes: [{ key: "uncategorized", label: "未分类", enabled: true, sort: 0 }]
   };
 }

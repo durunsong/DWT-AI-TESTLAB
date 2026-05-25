@@ -22,6 +22,7 @@ export type CaseTemplate = "user_login" | "admin_login" | "user_admin_kyc";
 export interface CreateCaseInput {
   caseId: string;
   caseName: string;
+  caseType?: string;
   description?: string;
   template: CaseTemplate;
 }
@@ -104,6 +105,7 @@ export class CaseService {
         return {
           caseId: validation.caseId ?? fallbackCaseId,
           caseName: validation.caseName ?? "DSL 校验失败",
+          caseType: parsed?.case_type ?? "uncategorized",
           description: parsed?.description,
           mode: parsed?.mode ?? "invalid",
           total: parsed?.steps.length ?? 0,
@@ -131,6 +133,7 @@ export class CaseService {
     return {
       caseId: validation.caseId ?? this.caseIdFromFilePath(filePath),
       caseName: validation.caseName ?? "DSL 校验失败",
+      caseType: parsed?.case_type ?? "uncategorized",
       description: parsed?.description,
       mode: parsed?.mode ?? "invalid",
       total: parsed?.steps.length ?? 0,
@@ -174,6 +177,7 @@ export class CaseService {
     const content = this.buildCaseYaml({
       caseId,
       caseName,
+      caseType: this.normalizeCaseType(input.caseType),
       description: input.description?.trim(),
       template: input.template
     });
@@ -187,6 +191,7 @@ export class CaseService {
     return {
       caseId,
       caseName,
+      caseType: parsed?.case_type ?? "uncategorized",
       description: input.description?.trim() || this.defaultDescription(input.template),
       mode: parsed?.mode ?? "web",
       total: parsed?.steps.length ?? 0,
@@ -254,6 +259,7 @@ export class CaseService {
       saved: true,
       caseId,
       caseName: validation.caseName,
+      caseType: parsed?.case_type ?? "uncategorized",
       description: parsed?.description,
       mode: parsed?.mode ?? "web",
       total: parsed?.steps.length ?? 0,
@@ -757,7 +763,9 @@ export class CaseService {
   }
 
   private normalizeContent(content: string): string {
-    return content.endsWith("\n") ? content : `${content}\n`;
+    const normalized = content.replace(/\r\n?/g, "\n");
+    const withCaseType = this.ensureCaseType(normalized);
+    return withCaseType.endsWith("\n") ? withCaseType : `${withCaseType}\n`;
   }
 
   private normalizeAiYamlShape(content: string): string {
@@ -768,6 +776,8 @@ export class CaseService {
       }
 
       const scenario = raw as Record<string, unknown>;
+      scenario.case_type = this.normalizeCaseType(this.stringValue(scenario.case_type) || this.stringValue(scenario.caseType));
+      delete scenario.caseType;
       const sessions = this.normalizeAiSessions(scenario.sessions);
       let steps = this.normalizeAiSteps(scenario.steps, sessions);
       let variables = this.normalizeAiVariables(scenario.variables, steps);
@@ -1268,6 +1278,26 @@ export class CaseService {
     return caseId.trim().replace(/\s+/g, "_").toLowerCase();
   }
 
+  private normalizeCaseType(caseType?: string): string {
+    const normalized = (caseType ?? "").trim().toLowerCase();
+    return /^[a-z][a-z0-9_-]{1,31}$/.test(normalized) ? normalized : "uncategorized";
+  }
+
+  private ensureCaseType(content: string): string {
+    if (/^case_type\s*:/m.test(content) || /^caseType\s*:/m.test(content)) {
+      return content;
+    }
+    const lines = content.split("\n");
+    const insertIndex = lines.findIndex((line) => /^case_name\s*:/.test(line));
+    if (insertIndex >= 0) {
+      lines.splice(insertIndex + 1, 0, "case_type: uncategorized");
+      return lines.join("\n");
+    }
+    const caseIdIndex = lines.findIndex((line) => /^case_id\s*:/.test(line));
+    lines.splice(caseIdIndex >= 0 ? caseIdIndex + 1 : 0, 0, "case_type: uncategorized");
+    return lines.join("\n");
+  }
+
   private buildCaseYaml(input: Required<Omit<CreateCaseInput, "description">> & { description?: string }): string {
     const description = input.description || this.defaultDescription(input.template);
     const body = this.templateBody(input.template);
@@ -1275,6 +1305,7 @@ export class CaseService {
     return [
       `case_id: ${input.caseId}`,
       `case_name: ${this.quoteYaml(input.caseName)}`,
+      `case_type: ${input.caseType}`,
       `description: ${this.quoteYaml(description)}`,
       `mode: ${body.mode}`,
       "defaults:",

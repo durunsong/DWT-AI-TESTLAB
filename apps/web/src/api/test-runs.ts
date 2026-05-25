@@ -46,6 +46,7 @@ export interface TestRunSummary {
     logs?: string;
     screenshots?: string;
     traces?: string;
+    videos?: string;
   };
 }
 
