@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
-import { Alert, Button, Card, Col, Row, Select, Space, Tabs, Tag, message } from "antd";
+import { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Card, Col, Row, Select, Space, Statistic, Tabs, Tag, Typography, message } from "antd";
 import { useNavigate } from "react-router-dom";
 import { getAppContext, getDbHealth } from "../../api/context";
 import { listCases } from "../../api/cases";
 import { listCaseTypes } from "../../api/settings";
+import { listRunHistory } from "../../api/reports";
 import { createBatchTestRun, createTestRun, getTestRun, getTestRunLogs } from "../../api/testRuns";
 import { EnvSelector } from "../../components/EnvSelector";
 import { LogTerminal } from "../../components/LogTerminal";
@@ -16,7 +17,10 @@ import { useCaseStore } from "../../stores/useCaseStore";
 import { useRunStore } from "../../stores/useRunStore";
 import { useSettingStore } from "../../stores/useSettingStore";
 import type { DbHealthResult, AppAuthSourceSummary, AppContextSummary, AppRouteNode } from "../../types/context";
+import type { RunHistoryItem } from "../../types/report";
 import type { CaseTypeConfig } from "../../types/settings";
+import { dashboardLayoutClasses } from "./dashboard-layout";
+import { buildQualityOverview } from "./quality-overview";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -30,10 +34,13 @@ export default function Dashboard() {
   const [batchLoading, setBatchLoading] = useState(false);
   const [context, setContext] = useState<AppContextSummary>();
   const [dbHealth, setDbHealth] = useState<DbHealthResult>();
+  const [history, setHistory] = useState<RunHistoryItem[]>([]);
+  const qualityOverview = useMemo(() => buildQualityOverview(cases, history), [cases, history]);
 
   useEffect(() => {
     listCases().then(setCases).catch((error) => messageApi.error(error.message));
     listCaseTypes().then(setCaseTypes).catch(() => setCaseTypes([{ key: "uncategorized", label: "未分类", enabled: true, sort: 0 }]));
+    listRunHistory().then(setHistory).catch(() => undefined);
     getAppContext().then(setContext).catch(() => undefined);
     getDbHealth().then(setDbHealth).catch(() => undefined);
   }, [messageApi, setCases]);
@@ -97,7 +104,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2.5">
+    <div className={dashboardLayoutClasses.page}>
       {contextHolder}
       <PageHeader
         title="运行工作台"
@@ -105,9 +112,42 @@ export default function Dashboard() {
         extra={<EnvSelector value={env} disabled={run?.status === "running"} onChange={setEnv} />}
       />
 
-      <Row gutter={[10, 10]} className="min-h-0 flex-1 overflow-y-auto xl:overflow-hidden">
-        <Col xs={24} xl={15} xxl={16} className="min-h-0 overflow-visible pr-0 xl:overflow-y-auto xl:overflow-x-hidden xl:pr-1">
+      <Row gutter={[10, 10]} className={dashboardLayoutClasses.row}>
+        <Col xs={24} xl={15} xxl={16} className={dashboardLayoutClasses.leftColumn}>
           <Space orientation="vertical" size={10} className="w-full">
+            <Card title="质量概览">
+              <Row gutter={[10, 10]}>
+                <Col span={6}>
+                  <Statistic title="可执行用例" value={qualityOverview.runnableCases} suffix={`/ ${qualityOverview.totalCases}`} />
+                </Col>
+                <Col span={6}>
+                  <Statistic title="近期待通过率" value={qualityOverview.passRateText} />
+                </Col>
+                <Col span={6}>
+                  <Statistic title="失败运行" value={qualityOverview.failedRuns} styles={{ content: { color: qualityOverview.failedRuns ? "#dc2626" : undefined } }} />
+                </Col>
+                <Col span={6}>
+                  <Statistic title="未验证用例" value={qualityOverview.unrunRunnableCases} />
+                </Col>
+              </Row>
+              <Alert
+                className="mt-2.5"
+                type={qualityOverview.recommendationTone}
+                showIcon
+                title={qualityOverview.recommendation}
+                description={qualityOverview.completedRuns ? `已纳入 ${qualityOverview.completedRuns} 次历史执行结果。` : "暂无历史运行结果，建议先执行核心冒烟用例。"}
+              />
+              {qualityOverview.topFailedCases.length ? (
+                <div className="mt-2.5 flex flex-wrap items-center gap-2 text-sm">
+                  <Typography.Text type="secondary">失败 Top：</Typography.Text>
+                  {qualityOverview.topFailedCases.map((item) => (
+                    <Tag key={item.caseId} color="error" className="m-0">
+                      {item.caseName} · {item.failures} 次
+                    </Tag>
+                  ))}
+                </div>
+              ) : null}
+            </Card>
             <Card title="流程入口">
               <RunButtonGroup
                 cases={cases}
@@ -138,8 +178,8 @@ export default function Dashboard() {
             </Card>
           </Space>
         </Col>
-        <Col xs={24} xl={9} xxl={8} className="min-h-0 pr-0 xl:max-h-full xl:overflow-y-auto xl:overflow-x-hidden xl:pr-1">
-          <div className="flex min-h-0 flex-col gap-2.5 pb-1">
+        <Col xs={24} xl={9} xxl={8} className={dashboardLayoutClasses.rightColumn}>
+          <div className={dashboardLayoutClasses.rightStack}>
             <Alert
               className="shrink-0"
               type={dbHealth?.enabled ? "success" : "warning"}

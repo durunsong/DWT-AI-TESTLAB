@@ -25,6 +25,28 @@ test("flushes every changed step once instead of keeping only the last event", (
   assert.deepEqual(flushed, ["open_page:passed", "click_save:running"]);
 });
 
+test("flushes changed steps through one batch callback", () => {
+  let scheduled: (() => void) | undefined;
+  const flushedBatches: string[][] = [];
+  const batcher = createStepUpdateBatcher({
+    schedule: (callback) => {
+      scheduled = callback;
+      return 1;
+    },
+    cancel: () => undefined,
+    onSteps: (steps) => {
+      flushedBatches.push(steps.map((item) => `${item.stepId}:${item.status}`));
+    }
+  });
+
+  batcher.enqueue(step("open_page", "running"));
+  batcher.enqueue(step("open_page", "passed"));
+  batcher.enqueue(step("click_save", "running"));
+  scheduled?.();
+
+  assert.deepEqual(flushedBatches, [["open_page:passed", "click_save:running"]]);
+});
+
 function step(stepId: string, status: StepResult["status"]): StepResult {
   return {
     stepId,

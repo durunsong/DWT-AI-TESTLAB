@@ -229,9 +229,9 @@ function buildSharedBindings(reference: SharedReference, template: Record<string
 
   for (const key of keys) {
     const definition = isRecord(definitions[key]) ? definitions[key] : {};
-    if (Object.hasOwn(provided, key)) {
+    if (hasOwn(provided, key)) {
       bindings[key] = provided[key];
-    } else if (Object.hasOwn(definition, "default")) {
+    } else if (hasOwn(definition, "default")) {
       bindings[key] = definition.default;
     } else if (definition.required === true) {
       throw new Error(`Missing shared step param: ${stringValue(template.shared_id) || stringValue(template.sharedId) || reference.use}.${key}`);
@@ -245,7 +245,7 @@ function applySharedBindings(value: unknown, bindings: Record<string, unknown>):
   if (typeof value === "string") {
     return value.replace(/\$\{([^}]+)\}/g, (match, expression: string) => {
       const key = expression.trim();
-      return Object.hasOwn(bindings, key) ? String(bindings[key] ?? "") : match;
+      return hasOwn(bindings, key) ? String(bindings[key] ?? "") : match;
     });
   }
   if (Array.isArray(value)) {
@@ -318,6 +318,10 @@ function isSharedReference(value: unknown): value is SharedReference {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasOwn(value: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function stringValue(value: unknown): string {

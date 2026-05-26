@@ -94,32 +94,60 @@
       "description": "默认类型，用于兼容未配置类型的历史用例。"
     },
     {
-      "key": "admin-mian",
-      "label": "admin-main",
+      "key": "auth",
+      "label": "认证与登录",
       "enabled": true,
       "sort": 10,
-      "description": "admin-主流程,每次部署之后都会进行的测试"
+      "description": "注册、登录、忘记密码和设备验证等账号入口流程。"
+    },
+    {
+      "key": "admin-main",
+      "label": "admin-main",
+      "enabled": true,
+      "sort": 20,
+      "description": "admin 主流程，每次部署之后都会进行的测试。"
     },
     {
       "key": "admin-smoke",
       "label": "admin-smoke",
       "enabled": true,
-      "sort": 20,
+      "sort": 30,
       "description": "admin-冒烟测试"
     },
     {
       "key": "user-main",
       "label": "user-main",
       "enabled": true,
-      "sort": 30,
+      "sort": 40,
       "description": "user-主流程,每次部署之后都会进行的测试"
     },
     {
       "key": "user-smoke",
       "label": "user-smoke",
       "enabled": true,
-      "sort": 40,
+      "sort": 50,
       "description": "user-冒烟测试"
+    },
+    {
+      "key": "wallet",
+      "label": "钱包首页",
+      "enabled": true,
+      "sort": 60,
+      "description": "钱包首页、资产展示和关键入口检查。"
+    },
+    {
+      "key": "message",
+      "label": "消息中心",
+      "enabled": true,
+      "sort": 70,
+      "description": "站内信、未读数、消息列表和详情检查。"
+    },
+    {
+      "key": "account-security",
+      "label": "账号安全",
+      "enabled": true,
+      "sort": 80,
+      "description": "手机号、邮箱、验证方式和安全校验流程。"
     }
   ]
 }

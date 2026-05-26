@@ -199,6 +199,11 @@
     box-shadow: inset 3px 0 0 #3b82f6;
   }
 
+  .case-list-table .ant-table-tbody > tr.ant-table-row-selected > td,
+  .case-list-table .ant-table-tbody > tr.ant-table-row-selected:hover > td {
+    background: #fff;
+  }
+
   .case-editor-drop-sense {
     pointer-events: none;
     background:

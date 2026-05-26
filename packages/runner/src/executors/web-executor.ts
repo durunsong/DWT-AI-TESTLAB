@@ -825,7 +825,10 @@ export class WebExecutor {
   }
 
   private stringField(value: unknown, fieldName: string): string | undefined {
-    if (value === undefined || typeof value === "string") {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (typeof value === "string") {
       return value;
     }
     throw new Error(`${fieldName} 必须是字符串`);
