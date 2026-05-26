@@ -3,7 +3,8 @@ import type { StepResult } from "../../types/run";
 interface StepUpdateBatcherOptions {
   schedule: (callback: () => void) => number;
   cancel: (handle: number) => void;
-  onStep: (step: StepResult) => void;
+  onStep?: (step: StepResult) => void;
+  onSteps?: (steps: StepResult[]) => void;
 }
 
 export interface StepUpdateBatcher {
@@ -20,8 +21,12 @@ export function createStepUpdateBatcher(options: StepUpdateBatcherOptions): Step
     frame = undefined;
     const steps = [...pendingSteps.values()];
     pendingSteps.clear();
+    if (options.onSteps) {
+      options.onSteps(steps);
+      return;
+    }
     for (const step of steps) {
-      options.onStep(step);
+      options.onStep?.(step);
     }
   }
 

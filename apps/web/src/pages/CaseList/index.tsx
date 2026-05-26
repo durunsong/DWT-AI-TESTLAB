@@ -20,6 +20,7 @@ import type { RcFile } from "antd/es/upload";
 import { useNavigate } from "react-router-dom";
 import { generateMaterialCaseDraft } from "../../api/ai";
 import { deleteCase, getCase, importCaseYaml, listCases, listSharedAbilities } from "../../api/cases";
+import { listRunHistory } from "../../api/reports";
 import { listCaseTypes } from "../../api/settings";
 import { createBatchTestRun, createTestRun } from "../../api/testRuns";
 import { EnvSelector } from "../../components/EnvSelector";
@@ -29,14 +30,18 @@ import { useCaseStore } from "../../stores/useCaseStore";
 import { useRunStore } from "../../stores/useRunStore";
 import { useSettingStore } from "../../stores/useSettingStore";
 import type { CaseItem, CreateCaseTemplate, SharedAbility } from "../../types/case";
+import type { RunHistoryItem } from "../../types/report";
 import type { CaseTypeConfig } from "../../types/settings";
 import { cn } from "../../utils/cn";
+import { createBase64FileCache, createObjectUrlPreview, mapWithConcurrency } from "../../utils/local-file";
 import type { ScenarioMode, ScenarioStep } from "@ai-e2e/shared";
 import { hasFileDrag } from "../CaseEditor/drag-upload";
 import { buildCaseSourceOptions, createCaseYamlFromSource } from "./case-source";
 import { buildBatchRunRequest, filterCasesByType } from "./case-batch";
+import { deriveCaseHealth } from "./case-health";
 import { createCaseListCopyMeta, type CaseListCopyTarget } from "./case-list-copy";
 import { caseListRenderDelayMs, shouldRenderCreateCaseModal } from "./case-list-rendering";
+import { type ManualSourceMode, resolveManualCreateMode } from "./manual-create-mode";
 import { canAcceptCreateCaseMaterialDrop, createCaseMaterialDropCopy } from "./material-drop";
 import { buildSharedAbilityOptions, summarizeSelectedSharedAbilities } from "./shared-abilities";
 
@@ -46,6 +51,7 @@ interface CreateCaseFormValues {
   description?: string;
   caseType: string;
   sourceCaseId: string;
+  manualSource: ManualSourceMode;
   template: CreateCaseTemplate;
   requirement?: string;
   prdText?: string;
@@ -223,7 +229,9 @@ export default function CaseList() {
   const { env, setEnv } = useSettingStore();
   const { setRun, setCurrentBatchId } = useRunStore();
   const [form] = Form.useForm<CreateCaseFormValues>();
+  const manualSource = Form.useWatch("manualSource", form) ?? "copy";
   const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState<RunHistoryItem[]>([]);
   const [runningCaseId, setRunningCaseId] = useState("");
   const [batchRunning, setBatchRunning] = useState(false);
   const [selectedCaseIds, setSelectedCaseIds] = useState<Key[]>([]);
@@ -255,7 +263,17 @@ export default function CaseList() {
   const materialDragDepthRef = useRef(0);
   const casesRenderTimerRef = useRef<number | undefined>(undefined);
   const caseTypesRenderTimerRef = useRef<number | undefined>(undefined);
+  const materialBase64CacheRef = useRef(createBase64FileCache());
+  const materialPreviewRevokeRef = useRef(new Map<string, () => void>());
   const materialDropCopy = materialDropActive ? createCaseMaterialDropCopy() : undefined;
+
+  useEffect(() => {
+    return () => {
+      materialPreviewRevokeRef.current.forEach((revoke) => revoke());
+      materialPreviewRevokeRef.current.clear();
+      materialBase64CacheRef.current.clear();
+    };
+  }, []);
 
   async function refresh() {
     setLoading(true);
@@ -274,8 +292,17 @@ export default function CaseList() {
     }
   }
 
+  async function refreshHistory() {
+    try {
+      setHistory(await listRunHistory());
+    } catch {
+      setHistory([]);
+    }
+  }
+
   useEffect(() => {
     void refresh();
+    void refreshHistory();
     return () => {
       window.clearTimeout(casesRenderTimerRef.current);
     };
@@ -439,6 +466,7 @@ export default function CaseList() {
       caseName: "",
       caseType: caseTypeOptions[0]?.value ?? "uncategorized",
       description: "",
+      manualSource: defaultSourceCaseId ? "copy" : "builtin",
       sourceCaseId: defaultSourceCaseId,
       template: "user_login",
       requirement: "",
@@ -474,7 +502,11 @@ export default function CaseList() {
   }
 
   async function createCaseByAi(values: CreateCaseFormValues, caseId: string) {
-    const files = await Promise.all(materialFiles.map(readUploadFileAsBase64));
+    const files = await mapWithConcurrency(
+      materialFiles,
+      2,
+      (file) => readUploadFileAsBase64(file, materialBase64CacheRef.current)
+    );
     const docUrls = (values.docUrlsText ?? "")
       .split(/\r?\n/)
       .map((item) => item.trim())
@@ -499,25 +531,30 @@ export default function CaseList() {
   }
 
   async function createCaseByTemplate(values: CreateCaseFormValues, caseId: string) {
-    const sourceCaseId = values.sourceCaseId;
-    const sourceOption = caseSourceOptions.find((item) => item.value === sourceCaseId);
-    if (!sourceCaseId || !sourceOption) {
-      throw new Error("请选择一个可用的用例来源");
+    const mode = resolveManualCreateMode({ manualSource: values.manualSource, sourceCaseId: values.sourceCaseId });
+    if (mode.kind === "invalid") {
+      throw new Error(mode.message);
     }
-    const source = await getCase(sourceCaseId);
-    const savedFromSource = await importCaseYaml({
-      content: createCaseYamlFromSource(source.content, {
-        caseId,
-        caseName: values.caseName,
-        caseType: values.caseType,
-        description: values.description
-      }),
-      caseId
-    });
-    if (!savedFromSource.saved) {
-      throw new Error(savedFromSource.validation?.issues?.map((item) => `${item.path}: ${item.message}`).join("; ") || "用例来源 YAML 未通过校验");
+    if (mode.kind === "copy") {
+      const sourceOption = caseSourceOptions.find((item) => item.value === mode.sourceCaseId);
+      if (!sourceOption) {
+        throw new Error("请选择一个可用的用例来源");
+      }
+      const source = await getCase(mode.sourceCaseId);
+      const savedFromSource = await importCaseYaml({
+        content: createCaseYamlFromSource(source.content, {
+          caseId,
+          caseName: values.caseName,
+          caseType: values.caseType,
+          description: values.description
+        }),
+        caseId
+      });
+      if (!savedFromSource.saved) {
+        throw new Error(savedFromSource.validation?.issues?.map((item) => `${item.path}: ${item.message}`).join("; ") || "用例来源 YAML 未通过校验");
+      }
+      return savedFromSource;
     }
-    return savedFromSource;
 
     if (templateSteps.length === 0) {
       throw new Error("模板步骤不能为空，请恢复默认步骤或至少保留一个步骤");
@@ -557,31 +594,63 @@ export default function CaseList() {
       return;
     }
 
-    await hydrateMaterialFilePreviews([...materialFiles, ...acceptedFiles]);
+    hydrateMaterialFilePreviews([...materialFiles, ...acceptedFiles]);
   }
 
-  async function hydrateMaterialFilePreviews(fileList: UploadFile[]) {
-    const nextFiles = await Promise.all(fileList.map(async (file) => {
+  function hydrateMaterialFilePreviews(fileList: UploadFile[]) {
+    const existingFiles = new Map(materialFiles.map((file) => [file.uid, file]));
+    const activePreviewUids = new Set<string>();
+    const nextFiles = fileList.map((file) => {
       if (!isImageUploadFile(file) || file.thumbUrl || !file.originFileObj) {
+        if (file.thumbUrl) activePreviewUids.add(file.uid);
         return file;
       }
+
+      const existingThumbUrl = existingFiles.get(file.uid)?.thumbUrl;
+      if (existingThumbUrl) {
+        activePreviewUids.add(file.uid);
+        return { ...file, thumbUrl: existingThumbUrl };
+      }
+
+      const preview = createObjectUrlPreview(file.originFileObj);
+      materialPreviewRevokeRef.current.get(file.uid)?.();
+      materialPreviewRevokeRef.current.set(file.uid, preview.revoke);
+      activePreviewUids.add(file.uid);
       return {
         ...file,
-        thumbUrl: await readFileAsDataUrl(file.originFileObj)
+        thumbUrl: preview.url
       };
-    }));
+    });
+
+    for (const [uid, revoke] of materialPreviewRevokeRef.current) {
+      if (!activePreviewUids.has(uid)) {
+        revoke();
+        materialPreviewRevokeRef.current.delete(uid);
+      }
+    }
+
     setMaterialFiles(nextFiles);
   }
 
   function removeMaterialFile(uid: string) {
+    materialPreviewRevokeRef.current.get(uid)?.();
+    materialPreviewRevokeRef.current.delete(uid);
     setMaterialFiles((current) => current.filter((item) => item.uid !== uid));
   }
 
-  async function openMaterialPreview(file: UploadFile) {
+  function openMaterialPreview(file: UploadFile) {
     if (!isImageUploadFile(file)) return;
-    const dataUrl = file.thumbUrl || (file.originFileObj ? await readFileAsDataUrl(file.originFileObj) : "");
-    if (!dataUrl) return;
-    setPreviewMaterial({ name: file.name, dataUrl });
+    if (file.thumbUrl) {
+      setPreviewMaterial({ name: file.name, dataUrl: file.thumbUrl });
+      return;
+    }
+    if (!file.originFileObj) return;
+
+    const preview = createObjectUrlPreview(file.originFileObj);
+    materialPreviewRevokeRef.current.get(file.uid)?.();
+    materialPreviewRevokeRef.current.set(file.uid, preview.revoke);
+    setMaterialFiles((current) => current.map((item) => item.uid === file.uid ? { ...item, thumbUrl: preview.url } : item));
+    setPreviewMaterial({ name: file.name, dataUrl: preview.url });
   }
 
   function moveTemplateStep(index: number, offset: -1 | 1) {
@@ -663,6 +732,7 @@ export default function CaseList() {
               onChange={(value) => setCaseTypeFilter(value ?? "")}
             />
             <Button
+              className="w-[124px]"
               icon={<PlayCircleOutlined />}
               loading={batchRunning}
               disabled={!selectedRunnableCount || Boolean(runningCaseId)}
@@ -676,7 +746,10 @@ export default function CaseList() {
             <Button
               icon={<ReloadOutlined className={loading ? "animate-spin" : undefined} />}
               disabled={loading}
-              onClick={() => void refresh()}
+              onClick={() => {
+                void refresh();
+                void refreshHistory();
+              }}
             >
               刷新
             </Button>
@@ -697,8 +770,8 @@ export default function CaseList() {
           }}
           rowClassName={() => "align-top"}
           tableLayout="fixed"
-          scroll={{ x: 1430 }}
-          className="[&_.ant-table-cell]:align-top"
+          scroll={{ x: 1580 }}
+          className="case-list-table [&_.ant-table-cell]:align-top"
           columns={[
             {
               title: "caseId",
@@ -759,6 +832,18 @@ export default function CaseList() {
               dataIndex: "valid",
               width: 90,
               render: (valid) => <Tag color={valid === false ? "error" : "success"}>{valid === false ? "需修复" : "可执行"}</Tag>
+            },
+            {
+              title: "健康",
+              width: 90,
+              render: (_, record) => {
+                const health = deriveCaseHealth(record, history);
+                return (
+                  <Tooltip title={health.description}>
+                    <Tag color={healthColor(health.tone)}>{health.label}</Tag>
+                  </Tooltip>
+                );
+              }
             },
             { title: "步骤数", dataIndex: "total", width: 80 },
             {
@@ -853,13 +938,13 @@ export default function CaseList() {
           className="mb-2.5"
           type="info"
           showIcon
-          title={createMode === "ai" ? "AI 会根据资料生成可编辑的 YAML 用例" : "新建后会生成一份可校验的 YAML 草稿"}
+          title={createMode === "ai" ? "AI 会根据资料生成可编辑的 YAML 用例" : manualSource === "copy" ? "从已有用例复制一份可独立维护的 YAML" : "从内置模板生成一份可校验的 YAML 草稿"}
           description="账号、密码、token 和地址仍然引用 .env 变量，不会写死到用例文件里。创建后可以继续用编辑页的 AI 助手补充步骤。"
         />
         <Form<CreateCaseFormValues>
           form={form}
           layout="vertical"
-          initialValues={{ sourceCaseId: caseSourceOptions[0]?.value, template: "user_login" }}
+          initialValues={{ manualSource: caseSourceOptions[0]?.value ? "copy" : "builtin", sourceCaseId: caseSourceOptions[0]?.value, template: "user_login" }}
           onValuesChange={(changed) => {
             if ("caseName" in changed && !form.getFieldValue("caseId")) {
               form.setFieldValue("caseId", normalizeCaseId(changed.caseName));
@@ -929,38 +1014,49 @@ export default function CaseList() {
           <Form.Item label="说明" name="description">
             <Input.TextArea rows={3} placeholder="简要说明这个用例覆盖的业务流程、前置条件或断言目标" showCount maxLength={180} />
           </Form.Item>
-          <Form.Item
-            label="选择用例来源"
-            name="sourceCaseId"
-            extra="从 cases/scenario 的现有用例继承 YAML 内容；login_user、login_admin 等常用用例会优先展示。"
-            rules={[{ required: createMode === "template", message: "请选择用例来源" }]}
-          >
-            <Select
-              showSearch
-              allowClear
-              placeholder="搜索 case_id、名称或文件路径"
-              optionFilterProp="searchText"
-              options={caseSourceOptions.map((option) => {
-                const caseTypeLabel = caseTypeLabelByKey.get(option.caseType) ?? option.caseType;
-                return {
-                  label: (
-                    <div className="grid min-w-0 gap-0.5 py-1">
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="truncate font-medium">{option.label}</span>
-                        <Tag className="m-0 shrink-0" color="blue">{caseTypeLabel}</Tag>
-                      </span>
-                      <span className="truncate text-xs text-slate-500">{option.description}</span>
-                    </div>
-                  ),
-                  value: option.value,
-                  searchText: `${option.label} ${option.description} ${caseTypeLabel} ${option.caseType}`
-                };
-              })}
-              notFoundContent={cases.length ? "没有可用的有效用例" : "暂无用例"}
-            />
-          </Form.Item>
-          <Form.Item hidden label="模板" name="template" rules={[{ required: true, message: "请选择模板" }]}>
-            <Radio.Group className="w-full">
+          {createMode === "template" ? (
+            <Form.Item label="创建方式" name="manualSource">
+              <Radio.Group optionType="button" buttonStyle="solid">
+                <Radio.Button value="copy" disabled={!caseSourceOptions.length}>复制已有用例</Radio.Button>
+                <Radio.Button value="builtin">内置模板</Radio.Button>
+              </Radio.Group>
+            </Form.Item>
+          ) : null}
+          {createMode === "template" && manualSource === "copy" ? (
+            <Form.Item
+              label="选择用例来源"
+              name="sourceCaseId"
+              extra="从 cases/scenario 的现有用例复制 YAML 内容；login_user、login_admin 等常用用例会优先展示。"
+              rules={[{ required: true, message: "请选择用例来源" }]}
+            >
+              <Select
+                showSearch
+                allowClear
+                placeholder="搜索 case_id、名称或文件路径"
+                optionFilterProp="searchText"
+                options={caseSourceOptions.map((option) => {
+                  const caseTypeLabel = caseTypeLabelByKey.get(option.caseType) ?? option.caseType;
+                  return {
+                    label: (
+                      <div className="grid min-w-0 gap-0.5 py-1">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="truncate font-medium">{option.label}</span>
+                          <Tag className="m-0 shrink-0" color="blue">{caseTypeLabel}</Tag>
+                        </span>
+                        <span className="truncate text-xs text-slate-500">{option.description}</span>
+                      </div>
+                    ),
+                    value: option.value,
+                    searchText: `${option.label} ${option.description} ${caseTypeLabel} ${option.caseType}`
+                  };
+                })}
+                notFoundContent={cases.length ? "没有可用的有效用例" : "暂无用例"}
+              />
+            </Form.Item>
+          ) : null}
+          {createMode === "template" && manualSource === "builtin" ? (
+            <Form.Item label="模板" name="template" rules={[{ required: true, message: "请选择模板" }]}>
+              <Radio.Group className="w-full">
               <div className="flex w-full flex-col gap-2.5">
                 {templateOptions.map((option) => (
                   <label
@@ -977,13 +1073,14 @@ export default function CaseList() {
                   </label>
                 ))}
               </div>
-            </Radio.Group>
-          </Form.Item>
-          {false && createMode === "template" ? (
+              </Radio.Group>
+            </Form.Item>
+          ) : null}
+          {createMode === "template" && manualSource === "builtin" ? (
             <div className="mb-2.5 rounded-lg border border-slate-200 bg-slate-50 p-4">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <Typography.Text strong>继承步骤</Typography.Text>
+                  <Typography.Text strong>模板步骤</Typography.Text>
                   <Typography.Text type="secondary" className="ml-2 !text-xs">
                     创建前可调整顺序或移除步骤，保存后生成独立 YAML。
                   </Typography.Text>
@@ -1186,7 +1283,10 @@ export default function CaseList() {
   );
 }
 
-async function readUploadFileAsBase64(file: UploadFile): Promise<{ name: string; mimeType?: string; base64: string }> {
+async function readUploadFileAsBase64(
+  file: UploadFile,
+  cache: ReturnType<typeof createBase64FileCache>
+): Promise<{ name: string; mimeType?: string; base64: string }> {
   const rawFile = file.originFileObj;
   if (!rawFile) {
     throw new Error(`${file.name} 文件读取失败`);
@@ -1195,22 +1295,11 @@ async function readUploadFileAsBase64(file: UploadFile): Promise<{ name: string;
     throw new Error(`${file.name} 超过 ${materialUploadMaxMb}MB，请拆分或精简后再上传`);
   }
 
-  const dataUrl = await readFileAsDataUrl(rawFile);
-
   return {
     name: file.name,
     mimeType: rawFile.type,
-    base64: dataUrl.split(",", 2)[1] ?? ""
+    base64: await cache.read(rawFile)
   };
-}
-
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error(`${file.name} 文件读取失败`));
-    reader.readAsDataURL(file);
-  });
 }
 
 function isImageUploadFile(file: UploadFile): boolean {
@@ -1235,6 +1324,13 @@ function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function healthColor(tone: ReturnType<typeof deriveCaseHealth>["tone"]): string {
+  if (tone === "success") return "success";
+  if (tone === "error") return "error";
+  if (tone === "processing") return "processing";
+  return "warning";
 }
 
 function normalizeCaseId(value?: string): string {

@@ -16,6 +16,7 @@ import { useSettingStore } from "../../stores/useSettingStore";
 import type { CaseAttachmentResult, CaseAttachmentSearchResult, CasePreflightResult, CaseValidationResult } from "../../types/case";
 import type { CaseTypeConfig } from "../../types/settings";
 import { cn } from "../../utils/cn";
+import { createBase64FileCache, createObjectUrlPreview } from "../../utils/local-file";
 import { playTypewriterText } from "../../utils/typewriter-text";
 import { appendInstructionBlock, buildAttachmentAiPrompt, buildAttachmentBatchAiPrompt, collectUploadSteps, filterNewAttachmentSearchResults, insertUploadStepBeforeSubmit, isImageAttachmentFile, upsertUploadStepFile, type AttachmentPromptFile, type UploadStepOption } from "./attachment-prompt";
 import { primaryAttachmentViewAction } from "./attachment-actions";
@@ -95,6 +96,8 @@ export default function CaseEditor() {
   const [pageDropTarget, setPageDropTarget] = useState<CaseEditorDropTarget>();
   const [caseTypes, setCaseTypes] = useState<CaseTypeConfig[]>([{ key: "uncategorized", label: "未分类", enabled: true, sort: 0 }]);
   const dragDepthRef = useRef(0);
+  const localFileBase64CacheRef = useRef(createBase64FileCache());
+  const aiInstructionPreviewRevokeRef = useRef(new Map<string, () => void>());
   const uploadSteps = collectUploadSteps(yaml);
   const selectedPromptFileList = Object.values(selectedPromptFiles);
   const visibleAttachments = attachments.filter((item) => attachmentMatches(item, attachmentQuery));
@@ -104,6 +107,14 @@ export default function CaseEditor() {
     ? selectedUploadStepId
     : uploadSteps[0]?.stepId;
   const dropCopy = pageDropTarget ? caseEditorDropCopy(pageDropTarget) : undefined;
+
+  useEffect(() => {
+    return () => {
+      aiInstructionPreviewRevokeRef.current.forEach((revoke) => revoke());
+      aiInstructionPreviewRevokeRef.current.clear();
+      localFileBase64CacheRef.current.clear();
+    };
+  }, []);
 
   useEffect(() => {
     if (!caseId) return;
@@ -389,7 +400,7 @@ export default function CaseEditor() {
         caseId: normalizeCaseId(caseId || activeCase?.caseId || "_draft"),
         fileName: file.name,
         mimeType: file.type,
-        base64: await readFileAsBase64(file)
+        base64: await localFileBase64CacheRef.current.read(file)
       });
       setAttachments((items) => [result, ...items.filter((item) => item.file !== result.file)]);
       setSelectedPromptFiles((current) => ({ ...current, [result.file]: attachmentToPromptFile(result) }));
@@ -410,19 +421,29 @@ export default function CaseEditor() {
     }
 
     setAiInstructionUploading(true);
+    let uid = "";
     try {
-      const dataUrl = await readFileAsDataUrl(file);
+      uid = `${file.uid}-${Date.now()}`;
+      const isImage = isImageAttachmentFile({ name: file.name, file: file.name, mimeType: file.type });
+      const preview = isImage ? createObjectUrlPreview(file) : undefined;
+      if (preview) {
+        aiInstructionPreviewRevokeRef.current.set(uid, preview.revoke);
+      }
       const attachment: AiInstructionAttachmentItem = {
-        uid: `${file.uid}-${Date.now()}`,
+        uid,
         name: file.name,
         mimeType: file.type,
-        base64: dataUrlToBase64(dataUrl),
+        base64: await localFileBase64CacheRef.current.read(file),
         sizeBytes: file.size,
-        previewUrl: isImageAttachmentFile({ name: file.name, file: file.name, mimeType: file.type }) ? dataUrl : undefined
+        previewUrl: preview?.url
       };
       setAiInstructionAttachments((items) => [attachment, ...items]);
       messageApi.success("已加入本次 AI 对话资料，不会保存为用例附件");
     } catch (error) {
+      if (uid) {
+        aiInstructionPreviewRevokeRef.current.get(uid)?.();
+        aiInstructionPreviewRevokeRef.current.delete(uid);
+      }
       messageApi.error(error instanceof Error ? error.message : String(error));
     } finally {
       setAiInstructionUploading(false);
@@ -442,6 +463,8 @@ export default function CaseEditor() {
   }
 
   function removeAiInstructionAttachment(uid: string) {
+    aiInstructionPreviewRevokeRef.current.get(uid)?.();
+    aiInstructionPreviewRevokeRef.current.delete(uid);
     setAiInstructionAttachments((items) => items.filter((item) => item.uid !== uid));
   }
 
@@ -1121,23 +1144,6 @@ function attachmentMatches(attachment: CaseAttachmentResult, query: string): boo
     return true;
   }
   return attachment.name.toLowerCase().includes(keyword) || attachment.file.toLowerCase().includes(keyword);
-}
-
-async function readFileAsBase64(file: File): Promise<string> {
-  return dataUrlToBase64(await readFileAsDataUrl(file));
-}
-
-async function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(reader.error ?? new Error(`${file.name} 文件读取失败`));
-    reader.readAsDataURL(file);
-  });
-}
-
-function dataUrlToBase64(dataUrl: string): string {
-  return dataUrl.split(",")[1] ?? "";
 }
 
 function toRcFile(file: File, index: number): RcFile {

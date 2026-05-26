@@ -17,6 +17,8 @@ import { useRunStore } from "../../stores/useRunStore";
 import type { BatchTestRunSummary, StepResult, TestRunEvent } from "../../types/run";
 import { toScreenshotUrl } from "../../utils/artifact-url";
 import { formatDuration, formatTime } from "../../utils/format";
+import { buildBatchProgressView } from "./batch-progress";
+import { buildBatchReportDetailPath, buildBatchReportModePath } from "./batch-report-links";
 import { buildRerunCaseRequest, canRerunCase } from "./rerun-case";
 import { createStepUpdateBatcher } from "./step-update-batcher";
 
@@ -31,7 +33,7 @@ export default function RunDetail() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [messageApi, contextHolder] = message.useMessage();
-  const { run, logs, setSummary, updateStep, setLogs, setRun, reset, currentBatchId, setCurrentBatchId } = useRunStore();
+  const { run, logs, setSummary, updateSteps, setLogs, setRun, reset, currentBatchId, setCurrentBatchId } = useRunStore();
   const runId = params.runId === "latest" ? "latest" : params.runId;
   const [aiAnalysis, setAiAnalysis] = useState("");
   const [aiLoadingStep, setAiLoadingStep] = useState("");
@@ -103,7 +105,7 @@ export default function RunDetail() {
     const stepUpdateBatcher = createStepUpdateBatcher({
       schedule: (callback) => window.requestAnimationFrame(callback),
       cancel: (frame) => window.cancelAnimationFrame(frame),
-      onStep: updateStep
+      onSteps: updateSteps
     });
     source.addEventListener("step_updated", (event) => {
       const payload = JSON.parse((event as MessageEvent).data) as TestRunEvent;
@@ -123,7 +125,7 @@ export default function RunDetail() {
       stepUpdateBatcher.cancel();
       source.close();
     };
-  }, [run?.status, runId, setLogs, setRun, setSummary, updateStep]);
+  }, [run?.status, runId, setLogs, setRun, setSummary, updateSteps]);
 
   useEffect(() => {
     if (!batchId) {
@@ -542,19 +544,8 @@ function renderDetailCell(props: { content: string; empty: boolean; danger?: boo
 
 function BatchProgressCard(props: { batch: BatchTestRunSummary; rerunFailedLoading?: boolean; onRerunFailed?: () => void }) {
   const { batch } = props;
-  const completed = batch.passed + batch.failed;
+  const progress = buildBatchProgressView(batch);
   const failedCount = batch.items.filter((item) => item.status === "failed").length;
-  const percent = batch.total ? Math.round((completed / batch.total) * 100) : 0;
-  const runningIndex = batch.items.findIndex((item) => item.status === "running");
-  const currentItem = runningIndex >= 0 ? batch.items[runningIndex] : batch.items.find((item) => item.status === "pending");
-  const currentText = currentItem
-    ? `${Math.max(runningIndex, 0) + 1}/${batch.total} ${currentItem.caseName || currentItem.caseId}`
-    : `${completed}/${batch.total}`;
-  const currentPercent = batch.total
-    ? batch.status === "running" && runningIndex >= 0
-      ? Math.round(((runningIndex + 1) / batch.total) * 100)
-      : Math.round((completed / batch.total) * 100)
-    : 0;
 
   return (
     <Card
@@ -579,12 +570,12 @@ function BatchProgressCard(props: { batch: BatchTestRunSummary; rerunFailedLoadi
         <Tag>等待 {batch.pending}</Tag>
       </Space>
       <div className="mb-3">
-        <div className="mb-1 text-sm text-slate-600">总进度：{completed}/{batch.total}</div>
-        <Progress percent={percent} status={batch.failed ? "exception" : batch.status === "passed" ? "success" : "active"} />
+        <div className="mb-1 text-sm text-slate-600">总进度：{progress.completed}/{batch.total}</div>
+        <Progress percent={progress.totalPercent} status={progress.totalStatus} />
       </div>
       <div className="mb-3">
-        <div className="mb-1 text-sm text-slate-600">当前用例：{currentText}</div>
-        <Progress percent={currentPercent} />
+        <div className="mb-1 text-sm text-slate-600">当前用例：{progress.currentText}</div>
+        <Progress percent={progress.currentPercent} status={progress.currentStatus} />
       </div>
       <Table
         size="small"
@@ -605,9 +596,11 @@ function BatchProgressCard(props: { batch: BatchTestRunSummary; rerunFailedLoadi
             width: 220,
             render: (_, record) => (
               <Space size={6}>
-                {record.runId ? <Link to={`/runs/${record.runId}`}>详情</Link> : <span className="text-slate-400">等待</span>}
+                {record.runId ? <Link to={buildBatchReportDetailPath({ runId: record.runId, fallbackRunId: "latest" })}>详情</Link> : <span className="text-slate-400">等待</span>}
                 {record.runId ? <Link to={`/reports/${record.runId}`}>报告</Link> : null}
-                {record.reportLinks?.logs ? <Button size="small" type="link" href={record.reportLinks.logs} target="_blank">日志</Button> : null}
+                {record.runId || record.reportLinks?.logs ? (
+                  <Link to={buildBatchReportModePath("logs", { runId: record.runId, fallbackRunId: "latest" })}>日志</Link>
+                ) : null}
               </Space>
             )
           }
