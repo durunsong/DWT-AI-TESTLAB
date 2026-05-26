@@ -9,7 +9,7 @@ test("marks current progress as exception when the only batch item failed", () =
       status: "failed",
       total: 1,
       failed: 1,
-      items: [{ caseId: "admin_zilikaoxiugai002", caseName: "admin profile update", caseType: "admin-mian", status: "failed" }]
+      items: [{ caseId: "admin_zilikaoxiugai002", caseName: "admin profile update", caseType: "admin-main", status: "failed" }]
     })
   );
 
