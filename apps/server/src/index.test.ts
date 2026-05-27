@@ -3,7 +3,20 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createServer } from "./index";
+import { createServer, resolveServerRootDir, shouldStartHttpServer } from "./index";
+
+test("starts automatically in Vercel runtime", () => {
+  assert.equal(shouldStartHttpServer({
+    argvEntry: "/var/task/apps/server/src/index.js",
+    isVercel: true
+  }), true);
+});
+
+test("resolves workspace root when command starts from apps/server", () => {
+  const workspaceRoot = path.resolve(process.cwd(), "../..");
+  const serverDir = path.resolve(workspaceRoot, "apps", "server");
+  assert.equal(resolveServerRootDir(serverDir), workspaceRoot);
+});
 
 test("rejects unsafe cross-origin settings writes by default", async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "dwt-server-origin-"));

@@ -77,11 +77,11 @@ export async function createServer(options: CreateServerOptions): Promise<Fastif
 }
 
 export async function startServer(options: StartServerOptions = {}): Promise<StartedServer> {
-  const rootDir = path.resolve(options.rootDir ?? findWorkspaceRoot(process.cwd()));
+  const rootDir = resolveServerRootDir(options.rootDir ?? process.cwd());
   const platformConfig = loadPlatformConfig(rootDir);
-  const host = options.host ?? process.env.SERVER_HOST ?? platformConfig.server.host;
+  const host = options.host ?? process.env.SERVER_HOST ?? defaultServerHost(platformConfig);
   const app = await createServer({ rootDir, logger: options.logger });
-  const configuredPort = Number(process.env.SERVER_PORT ?? platformConfig.server.port);
+  const configuredPort = Number(process.env.PORT ?? process.env.SERVER_PORT ?? platformConfig.server.port);
   await app.listen({ port: options.port ?? configuredPort, host });
 
   const address = app.server.address();
@@ -96,6 +96,10 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
     origin: `http://${originHost}:${port}`,
     close: () => app.close()
   };
+}
+
+export function resolveServerRootDir(startDir = process.cwd()): string {
+  return findWorkspaceRoot(startDir);
 }
 
 function findWorkspaceRoot(startDir: string): string {
@@ -148,20 +152,28 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-if (isDirectRun()) {
-  const platformConfig = loadPlatformConfig(findWorkspaceRoot(process.cwd()));
-  const port = Number(process.env.SERVER_PORT ?? platformConfig.server.port);
-  const host = process.env.SERVER_HOST ?? platformConfig.server.host;
-  void startServer({ port, host }).catch((error: unknown) => {
+if (shouldStartHttpServer()) {
+  const rootDir = resolveServerRootDir();
+  const platformConfig = loadPlatformConfig(rootDir);
+  const port = Number(process.env.PORT ?? process.env.SERVER_PORT ?? platformConfig.server.port);
+  const host = process.env.SERVER_HOST ?? defaultServerHost(platformConfig);
+  void startServer({ rootDir, port, host }).catch((error: unknown) => {
     console.error(error);
     process.exit(1);
   });
 }
 
-function isDirectRun(): boolean {
-  const entry = process.argv[1];
+export function shouldStartHttpServer(input: { argvEntry?: string; isVercel?: boolean } = {}): boolean {
+  return Boolean(input.isVercel ?? process.env.VERCEL) || isDirectRun(input.argvEntry ?? process.argv[1]);
+}
+
+function isDirectRun(entry: string | undefined): boolean {
   if (!entry) {
     return false;
   }
   return path.resolve(entry).replace(/\\/g, "/").endsWith("/apps/server/src/index.ts");
+}
+
+function defaultServerHost(platformConfig: PlatformConfig): string {
+  return process.env.VERCEL ? "0.0.0.0" : platformConfig.server.host;
 }

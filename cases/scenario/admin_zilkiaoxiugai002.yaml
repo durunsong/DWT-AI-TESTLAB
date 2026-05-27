@@ -1,6 +1,6 @@
 case_id: "admin_zilkiaoxiugai002"
 case_name: "admin 修改资料002"
-case_type: "admin-mian"
+case_type: "admin-main"
 mode: web
 defaults:
   step_timeout_ms: 20000
