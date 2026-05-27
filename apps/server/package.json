@@ -11,7 +11,7 @@
     "build:dev": "tsc -p tsconfig.json --noEmit",
     "build:sit": "tsc -p tsconfig.json --noEmit",
     "build:prod": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test \"src/**/*.test.ts\"",
+    "test": "node ../../scripts/run-tests-if-present.mjs \"src/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
