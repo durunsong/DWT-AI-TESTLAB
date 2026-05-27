@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "src/index.ts": {
+      "includeFiles": "{../../platform.config.json,../../cases/**,../../.env.example}",
+      "maxDuration": 60
+    }
+  }
+}
