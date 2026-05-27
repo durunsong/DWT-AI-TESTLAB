@@ -14,16 +14,20 @@ function convertLine(line: string, index: number): ScenarioStep | undefined {
     return { step_id: stepId, name: "打开页面", type: "web_open", session: "user", url: quoted[0] };
   }
   if (line.includes(".fill(")) {
-    return { step_id: stepId, name: "输入内容", type: "web_input", session: "user", target: `locator_${index + 1}`, value: quoted.at(-1) ?? "" };
+    return { step_id: stepId, name: "输入内容", type: "web_input", session: "user", target: `locator_${index + 1}`, value: lastValue(quoted) };
   }
   if (line.includes(".click(")) {
     return { step_id: stepId, name: "点击元素", type: "web_click", session: "user", target: `locator_${index + 1}` };
   }
   if (line.includes("toContainText")) {
-    return { step_id: stepId, name: "断言文本", type: "web_assert_text", session: "user", target: `locator_${index + 1}`, expected: quoted.at(-1) ?? "" };
+    return { step_id: stepId, name: "断言文本", type: "web_assert_text", session: "user", target: `locator_${index + 1}`, expected: lastValue(quoted) };
   }
   if (line.includes("toBeVisible")) {
     return { step_id: stepId, name: "断言可见", type: "web_assert_visible", session: "user", target: `locator_${index + 1}` };
   }
   return undefined;
+}
+
+function lastValue(values: Array<string | undefined>): string {
+  return values[values.length - 1] ?? "";
 }

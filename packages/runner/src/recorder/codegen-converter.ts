@@ -27,5 +27,6 @@ function extractFirstString(line: string): string | undefined {
 
 function extractLastString(line: string): string | undefined {
   const matches = [...line.matchAll(/['"`]([^'"`]+)['"`]/g)];
-  return matches.at(-1)?.[1];
+  const lastMatch = matches[matches.length - 1];
+  return lastMatch?.[1];
 }
