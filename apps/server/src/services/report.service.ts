@@ -123,7 +123,11 @@ export class ReportService {
     for (const kind of uniqueKinds) {
       const dir = this.artifactDir(kind);
       const entries = await fs.readdir(dir).catch(() => []);
-      await Promise.all(entries.map((entry) => fs.rm(path.resolve(dir, entry), { recursive: true, force: true })));
+      await Promise.all(
+        entries
+          .filter((entry) => this.canClearArtifactEntry(kind, entry))
+          .map((entry) => fs.rm(path.resolve(dir, entry), { recursive: true, force: true }))
+      );
     }
 
     return {
@@ -217,7 +221,7 @@ export class ReportService {
 
   private async artifactSummary(kind: ArtifactKind): Promise<ArtifactSummary> {
     const dir = this.artifactDir(kind);
-    const stats = await this.readDirStats(dir);
+    const stats = await this.readDirStats(dir, kind);
     return {
       kind,
       path: path.relative(this.rootDir, dir).replace(/\\/g, "/"),
@@ -255,15 +259,18 @@ export class ReportService {
     return value;
   }
 
-  private async readDirStats(dir: string): Promise<{ count: number; sizeBytes: number }> {
+  private async readDirStats(dir: string, kind: ArtifactKind): Promise<{ count: number; sizeBytes: number }> {
     const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
     let count = 0;
     let sizeBytes = 0;
 
     for (const entry of entries) {
+      if (!this.canClearArtifactEntry(kind, entry.name)) {
+        continue;
+      }
       const entryPath = path.resolve(dir, entry.name);
       if (entry.isDirectory()) {
-        const nested = await this.readDirStats(entryPath);
+        const nested = await this.readDirStats(entryPath, kind);
         count += 1 + nested.count;
         sizeBytes += nested.sizeBytes;
       } else {
@@ -277,6 +284,13 @@ export class ReportService {
 
   private isArtifactKind(value: string): value is ArtifactKind {
     return value === "ai-reports" || platformArtifactKinds.includes(value as PlatformArtifactKind);
+  }
+
+  private canClearArtifactEntry(kind: ArtifactKind, entry: string): boolean {
+    if (kind !== "logs") {
+      return true;
+    }
+    return /^[a-zA-Z0-9_-]+\.log$/.test(entry);
   }
 
   private async readHistoryItem(filePath: string): Promise<RunHistoryItem | undefined> {

@@ -55,6 +55,23 @@ test("includes AI reports in artifact summaries and clearing", async () => {
   await assert.rejects(() => fs.stat(path.join(rootDir, "ai-reports", "run_a")));
 });
 
+test("keeps server dev logs when clearing run logs", async () => {
+  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "dwt-report-clear-logs-"));
+  await fs.mkdir(path.join(rootDir, "logs"), { recursive: true });
+  await fs.writeFile(path.join(rootDir, "logs", "001_case.log"), "run log", "utf8");
+  await fs.writeFile(path.join(rootDir, "logs", "server-dev.out.log"), "server out", "utf8");
+  await fs.writeFile(path.join(rootDir, "logs", "server-dev.err.log"), "server err", "utf8");
+
+  const service = new ReportService(rootDir);
+  const result = await service.clearArtifacts(["logs"]);
+
+  await assert.rejects(() => fs.stat(path.join(rootDir, "logs", "001_case.log")));
+  assert.equal(await fs.readFile(path.join(rootDir, "logs", "server-dev.out.log"), "utf8"), "server out");
+  assert.equal(await fs.readFile(path.join(rootDir, "logs", "server-dev.err.log"), "utf8"), "server err");
+  assert.equal(result.cleared[0]?.count, 0);
+  assert.equal(result.remaining.find((item) => item.kind === "logs")?.count, 0);
+});
+
 test("reads latest run summary and log from report history", async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "dwt-report-latest-"));
   await fs.mkdir(path.join(rootDir, "reports"), { recursive: true });
