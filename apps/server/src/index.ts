@@ -164,7 +164,7 @@ if (shouldStartHttpServer()) {
 }
 
 export function shouldStartHttpServer(input: { argvEntry?: string; isVercel?: boolean } = {}): boolean {
-  return Boolean(input.isVercel ?? process.env.VERCEL) || isDirectRun(input.argvEntry ?? process.argv[1]);
+  return isDirectRun(input.argvEntry ?? process.argv[1]);
 }
 
 function isDirectRun(entry: string | undefined): boolean {

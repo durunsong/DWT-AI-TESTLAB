@@ -5,17 +5,30 @@ import path from "node:path";
 import test from "node:test";
 import { createServer, resolveServerRootDir, shouldStartHttpServer } from "./index";
 
-test("starts automatically in Vercel runtime", () => {
+test("does not start the HTTP server just because Vercel env exists", () => {
   assert.equal(shouldStartHttpServer({
-    argvEntry: "/var/task/apps/server/src/index.js",
+    argvEntry: "/var/task/api/index.js",
     isVercel: true
-  }), true);
+  }), false);
 });
 
 test("resolves workspace root when command starts from apps/server", () => {
   const workspaceRoot = path.resolve(process.cwd(), "../..");
   const serverDir = path.resolve(workspaceRoot, "apps", "server");
   assert.equal(resolveServerRootDir(serverDir), workspaceRoot);
+});
+
+test("Vercel config targets the api function entry", async () => {
+  const config = JSON.parse(await fs.readFile(path.resolve(process.cwd(), "vercel.json"), "utf8")) as {
+    functions?: Record<string, unknown>;
+    rewrites?: Array<{ source: string; destination: string }>;
+  };
+
+  assert.ok(config.functions?.["api/index.ts"]);
+  assert.deepEqual(config.rewrites?.[0], {
+    source: "/(.*)",
+    destination: "/api/index"
+  });
 });
 
 test("rejects unsafe cross-origin settings writes by default", async () => {
