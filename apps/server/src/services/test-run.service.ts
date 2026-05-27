@@ -194,8 +194,13 @@ export class TestRunService {
   }
 
   latestRun(): TestRunSummary | undefined {
-    return [...this.runs.values()]
-      .sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))[0];
+    let latest: TestRunSummary | undefined;
+    for (const run of this.runs.values()) {
+      if (!latest || String(run.startedAt).localeCompare(String(latest.startedAt)) >= 0) {
+        latest = run;
+      }
+    }
+    return latest;
   }
 
   private applyEvent(summary: TestRunSummary, event: TestRunEvent): void {

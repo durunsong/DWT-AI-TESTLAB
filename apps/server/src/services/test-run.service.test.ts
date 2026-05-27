@@ -16,6 +16,9 @@ test("resolves latest to the newest in-memory run", async () => {
   const service = new TestRunService(runner as never, rootDir);
   const first = await service.start({ caseId: "first_case", env: "local" });
   const second = await service.start({ caseId: "second_case", env: "local" });
+  const sameStartedAt = "2026-05-27T01:00:00.000Z";
+  service.get(first.runId).startedAt = sameStartedAt;
+  service.get(second.runId).startedAt = sameStartedAt;
 
   assert.equal(service.get("latest").runId, second.runId);
   assert.equal(service.get("latest").caseId, "second_case");
